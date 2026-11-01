@@ -1,0 +1,20 @@
+{
+  "_comment": "audio.cpp models for the 'TextToSpeech' tab. Each entry is one text-to-speech model. 'folder' is resolved against audiocpp_models_dir (configs/constants.json); use 'path' instead for an absolute path. 'id' is the model id the audio.cpp server exposes; 'family' must match a file in model_specs/ (e.g. kokoro_tts, qwen3_tts, pocket_tts). Optional keys: 'mode', 'load_options', 'session_options', 'default_request_options', 'voice_presets', 'default_voice_preset'. Entries missing alias/id/family/path are ignored.",
+  "_example": {
+    "alias": "Kokoro 82M",
+    "id": "kokoro-tts",
+    "family": "kokoro_tts",
+    "folder": "Kokoro-82M"
+  },
+  "models": [
+    {
+      "alias": "PocketTTS (English)",
+      "id": "pocket-tts",
+      "family": "pocket_tts",
+      "folder": "PocketTTS-GGUF/english",
+      "load_options": {
+        "language": "english"
+      }
+    }
+  ]
+}

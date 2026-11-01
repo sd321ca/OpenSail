@@ -1,0 +1,31 @@
+__pycache__
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+todo.md
+
+# Secrets
+.env
+
+# Gradio runtime files (auto-generated, machine-specific)
+.gradio/
+
+# Saved voice-cloning references (auto-generated, machine-specific)
+voices/
+
+workflows/
+configs/audio_models.json
+
+configs/chat_models.json
+configs/samplers.json
+configs/schedulers.json
+configs/workflow_fields.json
+configs/workflow_notes.json
+configs/workflow_presets.json

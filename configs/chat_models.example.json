@@ -1,0 +1,13 @@
+{
+  "models": [
+    {
+      "alias": "Gemma4 4B",
+      "path": "C:/llama_cpp/models/gemma-4-E4B_q4_0-it.gguf",
+      "mmproj": "C:/llama_cpp/models/gemma-4-E4B-it-mmproj.gguf"
+    },
+    {
+      "alias": "Gemma4 2B",
+      "path": "C:/llama_cpp/models/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
+    }
+  ]
+}

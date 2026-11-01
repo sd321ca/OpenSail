@@ -1,0 +1,10 @@
+[
+  "beta",
+  "ddim_uniform",
+  "exponential",
+  "karras",
+  "kl_optimal",
+  "linear_quadratic",
+  "sgm_uniform",
+  "simple"
+]

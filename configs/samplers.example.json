@@ -1,0 +1,11 @@
+[
+  "dpm_2",
+  "er_sde",
+  "euler",
+  "dpmpp_sde_gpu",
+  "dpmpp_2m_sde_gpu",
+  "dpmpp_2m_sde_heun_gpu",
+  "lcm",
+  "res_multistep",
+  "uni_pc"
+]
