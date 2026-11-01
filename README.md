@@ -1,9 +1,10 @@
 # OpenSail
 
-OpenSail is an Open source Suite of AI tools for Local models.  It has support for 
+OpenSail is an Open source Suite of AI tools for Local models. The purpose is to allow 
+you to easily use your local AI models through a mobile-friendly interface over your LAN or over the internet.  It has support for 
 your existing ComfyUI workflows, llama.cpp, and audio.cpp. It provides a local, 
 Gradio-based workbench for generative media. Run ComfyUI workflows
-(text-to-image, text-to-music and text-to-video), chat with local GGUF models
+(image, video, music), chat with local GGUF models
 through [llama.cpp](https://github.com/ggml-org/llama.cpp), and generate or
 clone speech with [audio.cpp](https://github.com/0xShug0/audio.cpp) — all from
 a single interface, with every model running on your own machine. Each backend
@@ -121,6 +122,9 @@ Environment variables set outside the file take priority over the `.env` file.
   > `llama-cpp-python` build is required, which sidesteps the AVX-512
   > incompatibility of its prebuilt CUDA wheels on 12th/13th-gen Intel CPUs.
 
+  <img width="1082" height="3743" alt="chat" src="https://github.com/user-attachments/assets/adbb11b2-f778-46e4-a0c0-bcdfd79aee3a" />
+
+
 - **Generate** — pick a workflow, choose which node inputs to control, and
   generate an image, a song or a video. Press **Choose inputs…** to open a
   popup listing every editable node input in the workflow (node ID, title and
@@ -144,6 +148,11 @@ Environment variables set outside the file take priority over the `.env` file.
   - Workflows with `LoadImage` nodes (e.g. `Image Edit - 1 Input.json`) show
     one **Input images** slot per node. Each slot is an image editor, so you
     can upload a file **or draw a sketch** to use as the input image.
+
+<img width="692" height="565" alt="workflow config" src="https://github.com/user-attachments/assets/4cd3ac9f-5d5b-4aef-825c-d691351d2177" />
+
+<img width="433" height="1696" alt="generate" src="https://github.com/user-attachments/assets/0626817d-372c-425f-8f47-f504412ff2da" />
+ 
 - **TextToSpeech** — text-to-speech and voice cloning via
   [audio.cpp](https://github.com/0xShug0/audio.cpp). Pick a model (aliases from
   `audio_models.json`), type the text, optionally choose a **Voice** preset or
