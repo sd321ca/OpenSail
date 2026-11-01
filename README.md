@@ -1,6 +1,8 @@
-# ComfyUI Workflow UI
+# OpenSail
 
-A local, Gradio-based workbench for generative media. Run ComfyUI workflows
+OpenSail is an Open source Suite of AI tools for Local models.  It has support for 
+your existing ComfyUI workflows, llama.cpp, and audio.cpp. It provides a local, 
+Gradio-based workbench for generative media. Run ComfyUI workflows
 (text-to-image, text-to-music and text-to-video), chat with local GGUF models
 through [llama.cpp](https://github.com/ggml-org/llama.cpp), and generate or
 clone speech with [audio.cpp](https://github.com/0xShug0/audio.cpp) — all from
