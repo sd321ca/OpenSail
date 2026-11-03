@@ -4,7 +4,7 @@ A small Gradio front-end for running ComfyUI workflows and browsing the
 images they produce.
 """
 
-from .assets import FULLSCREEN_TEXT_JS, MOBILE_CSS
+from .assets import APP_JS, MOBILE_CSS
 from .audio import AudioModel, build_audio_tab
 from .chat import ChatModel, build_chat_tab
 from .config import (
@@ -20,10 +20,10 @@ from .fields import get_fields
 from .ui import build_ui
 
 __all__ = [
+    "APP_JS",
     "ASPECT_RATIOS",
     "COMFY_URL",
     "DEFAULT_WORKFLOW",
-    "FULLSCREEN_TEXT_JS",
     "GRADIO_AUTH",
     "GRADIO_SERVER_NAME",
     "GRADIO_SERVER_PORT",

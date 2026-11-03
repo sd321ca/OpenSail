@@ -143,3 +143,20 @@ textarea.fullscreen-text-open {
     cursor: pointer;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
+
+/* Slider number boxes are a readout, not an input: the value is set by
+   dragging the slider (see slider.js, which also makes them read-only for
+   keyboard and screen-reader users). Clicks and the spinner arrows are
+   disabled here, and the text is left looking like ordinary field text. */
+.slider-readonly [data-testid="number-input"] {
+    pointer-events: none;
+    cursor: default;
+    caret-color: transparent;
+    user-select: none;
+    -moz-appearance: textfield;
+}
+.slider-readonly [data-testid="number-input"]::-webkit-outer-spin-button,
+.slider-readonly [data-testid="number-input"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}

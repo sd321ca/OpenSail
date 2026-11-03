@@ -354,8 +354,9 @@ The file has one top-level key, `fields` (the controls themselves).
 - `key` — the field name used internally to select this widget definition.
 - `widget` — one of `textbox`, `slider`, `dropdown`, `number`, `checkbox`.
 - `options` — widget-specific kwargs. For `slider`, use `minimum` / `maximum`
-  / `step`. For `dropdown`, use `choices_source` (one of `samplers`,
-  `schedulers`, `aspect_ratios`, `music_modes`). For `textbox`,
+  / `step`; the number box beside a slider is a read-only readout, so the value
+  is set by dragging the slider. For `dropdown`, use `choices_source` (one of
+  `samplers`, `schedulers`, `aspect_ratios`, `music_modes`). For `textbox`,
   `"fullscreen": true` opens the field as a full-screen editor on phones while
   it has focus (the soft keyboard never covers the text); desktop keeps the
   normal inline textarea.

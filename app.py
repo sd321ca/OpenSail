@@ -4,7 +4,7 @@ Run with ``python app.py`` and visit http://127.0.0.1:7860
 """
 
 from comfyui_ui import (
-    FULLSCREEN_TEXT_JS,
+    APP_JS,
     GRADIO_AUTH,
     GRADIO_SERVER_NAME,
     GRADIO_SERVER_PORT,
@@ -21,7 +21,8 @@ def main() -> None:
     # auth is a (username, password) tuple from the .env file, or None to
     # disable authentication.
     # css holds the responsive tweaks that make the UI work on narrow screens.
-    # js adds the phone-only full-screen editor for fields marked "fullscreen".
+    # js adds the browser-side tweaks: the phone-only full-screen editor for
+    # fields marked "fullscreen", and the read-only slider number boxes.
     # _app passes the already-built FastAPI app so the custom image-proxy route
     # registered in build_ui survives launch (launch otherwise replaces the
     # app instance, dropping any routes added beforehand).
@@ -31,7 +32,7 @@ def main() -> None:
         share=GRADIO_SERVER_PUBLIC_ACCESS,
         auth=GRADIO_AUTH,
         css=MOBILE_CSS,
-        js=FULLSCREEN_TEXT_JS,
+        js=APP_JS,
         _app=demo.app,
     )
 

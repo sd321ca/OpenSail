@@ -62,6 +62,10 @@ from .workflows import (
 # widths keep the normal inline textarea.
 FULLSCREEN_TEXT_CLASS = "fullscreen-text"
 
+# Class given to every slider. Its number box stays visible as a readout but
+# cannot be typed into (slider.js + mobile.css): the value is set by dragging.
+READONLY_SLIDER_CLASS = "slider-readonly"
+
 
 # ---------------------------------------------------------------------------
 # Widget construction
@@ -80,6 +84,15 @@ def _widget_kwargs(field: dict) -> dict:
     return options
 
 
+def _with_class(options: dict, name: str) -> dict:
+    """Append ``name`` to an options dict's ``elem_classes``, in place."""
+    classes = options.get("elem_classes") or []
+    if isinstance(classes, str):
+        classes = [classes]
+    options["elem_classes"] = [*classes, name]
+    return options
+
+
 def _build_candidate_widget(candidate: dict):
     """Create the control for one node/input candidate.
 
@@ -94,12 +107,9 @@ def _build_candidate_widget(candidate: dict):
 
     if widget == "textbox":
         if field.get("options", {}).get("fullscreen"):
-            # Tag the textbox so FULLSCREEN_TEXT_JS can promote it to a
-            # full-screen editor on phones when it gains focus.
-            classes = options.get("elem_classes") or []
-            if isinstance(classes, str):
-                classes = [classes]
-            options["elem_classes"] = [*classes, FULLSCREEN_TEXT_CLASS]
+            # Tag the textbox so the launched script (fullscreen.js) can
+            # promote it to a full-screen editor on phones when it gains focus.
+            _with_class(options, FULLSCREEN_TEXT_CLASS)
         return gr.Textbox(
             label=label, value=value, interactive=True, **options
         )
@@ -107,6 +117,9 @@ def _build_candidate_widget(candidate: dict):
     if widget == "slider":
         minimum = options.pop("minimum", 0)
         maximum = options.pop("maximum", 1)
+        # The number box beside the slider is only a readout (slider.js makes
+        # it read-only), so the value can only be changed by dragging.
+        _with_class(options, READONLY_SLIDER_CLASS)
         return gr.Slider(
             minimum,
             maximum,
