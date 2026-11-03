@@ -30,7 +30,8 @@ Each field entry has the shape::
 registry-only keys: ``choices_source`` (dropdown choices, see
 ``resolve_choices``) and ``fullscreen`` (textbox only). ``"fullscreen": true``
 opens the textbox as a full-screen editor on phones while it has focus; on
-desktop it keeps the normal inline textarea. See ``ui.FULLSCREEN_TEXT_JS``.
+desktop it keeps the normal inline textarea. See ``assets.FULLSCREEN_TEXT_JS``
+(in ``fullscreen.js``).
 """
 
 import json
