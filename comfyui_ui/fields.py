@@ -25,6 +25,12 @@ Each field entry has the shape::
             "music_key": "style"           # optional: inline on music node
         }
     }
+
+``options`` are passed straight to the Gradio component, except for two
+registry-only keys: ``choices_source`` (dropdown choices, see
+``resolve_choices``) and ``fullscreen`` (textbox only). ``"fullscreen": true``
+opens the textbox as a full-screen editor on phones while it has focus; on
+desktop it keeps the normal inline textarea. See ``ui.FULLSCREEN_TEXT_JS``.
 """
 
 import json

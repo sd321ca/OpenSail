@@ -355,7 +355,10 @@ The file has one top-level key, `fields` (the controls themselves).
 - `widget` — one of `textbox`, `slider`, `dropdown`, `number`, `checkbox`.
 - `options` — widget-specific kwargs. For `slider`, use `minimum` / `maximum`
   / `step`. For `dropdown`, use `choices_source` (one of `samplers`,
-  `schedulers`, `aspect_ratios`, `music_modes`).
+  `schedulers`, `aspect_ratios`, `music_modes`). For `textbox`,
+  `"fullscreen": true` opens the field as a full-screen editor on phones while
+  it has focus (the soft keyboard never covers the text); desktop keeps the
+  normal inline textarea.
 - `match` — optional. How node inputs map to this widget. If omitted, the
   field matches an input whose key is the same as the field `key`. The block
   supports:

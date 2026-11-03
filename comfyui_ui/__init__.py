@@ -16,12 +16,13 @@ from .config import (
     GRADIO_SERVER_PUBLIC_ACCESS
 )
 from .fields import get_fields
-from .ui import MOBILE_CSS, build_ui
+from .ui import FULLSCREEN_TEXT_JS, MOBILE_CSS, build_ui
 
 __all__ = [
     "ASPECT_RATIOS",
     "COMFY_URL",
     "DEFAULT_WORKFLOW",
+    "FULLSCREEN_TEXT_JS",
     "GRADIO_AUTH",
     "GRADIO_SERVER_NAME",
     "GRADIO_SERVER_PORT",

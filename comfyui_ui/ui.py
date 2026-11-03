@@ -160,6 +160,171 @@ gradio-app .app {
 .field-picker-dialog .add-row-button {
     display: none !important;
 }
+
+/* Full-screen typing on phones. Web textareas always edit inline, so a field
+   marked "fullscreen" in fields.json is pinned over the rest of the page while
+   it has focus (see FULLSCREEN_TEXT_JS). The overlay is sized from the visual
+   viewport, so the soft keyboard never covers the text being typed;
+   --fullscreen-top / --fullscreen-height are set on the root by the script. */
+textarea.fullscreen-text-open {
+    position: fixed !important;
+    top: var(--fullscreen-top, 0px) !important;
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    height: var(--fullscreen-height, 70vh) !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 12px 12px 64px 12px !important;
+    z-index: 10001 !important;
+    border-radius: 12px !important;
+    background: var(--background-fill-primary, #ffffff) !important;
+    color: var(--body-text-color, #1f2937) !important;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45) !important;
+    resize: none !important;
+    /* iOS zooms the page in when a focused field's text is under 16px. */
+    font-size: 16px !important;
+}
+.fullscreen-text-done {
+    position: fixed;
+    top: calc(var(--fullscreen-top, 0px) + var(--fullscreen-height, 70vh) - 52px);
+    right: 20px;
+    z-index: 10002;
+    padding: 8px 18px;
+    border: none;
+    border-radius: 999px;
+    background: var(--color-accent, #4f46e5);
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+"""
+
+# Class given to textareas whose field sets "fullscreen": true, and the script
+# that emulates a full-screen editor for them on phones. There is no web API
+# for the OS's native full-screen text editor, so instead the focused textarea
+# is pinned to the visual viewport (above the soft keyboard) with a Done button
+# to dismiss it. Desktop widths keep the normal inline textarea.
+FULLSCREEN_TEXT_CLASS = "fullscreen-text"
+
+FULLSCREEN_TEXT_JS = """
+() => {
+    const CLASS = "fullscreen-text";
+    const OPEN = "fullscreen-text-open";
+    // Ignore a focus that arrives right after closing. Some mobile browsers
+    // re-focus the textarea once the Done button disappears, which would
+    // otherwise reopen the editor the moment it was dismissed.
+    const SETTLE_MS = 400;
+    let open = null;
+    let closedAt = 0;
+
+    const root = document.documentElement;
+    const viewport = () => window.visualViewport || null;
+    // Phones and other touch devices, including ones wide in landscape.
+    const isPhone = () =>
+        window.matchMedia("(max-width: 900px)").matches ||
+        window.matchMedia("(pointer: coarse)").matches;
+
+    const layout = () => {
+        if (!open) return;
+        const port = viewport();
+        const top = port ? port.offsetTop : 0;
+        const height = port ? port.height : window.innerHeight;
+        root.style.setProperty("--fullscreen-top", (top + 8) + "px");
+        root.style.setProperty(
+            "--fullscreen-height", Math.max(140, height - 16) + "px"
+        );
+    };
+
+    const close = () => {
+        if (!open) return;
+        const { area, done, height, overflow } = open;
+        open = null;
+        closedAt = Date.now();
+        area.classList.remove(OPEN);
+        root.style.removeProperty("--fullscreen-top");
+        root.style.removeProperty("--fullscreen-height");
+        document.body.style.overflow = overflow;
+        if (done) done.remove();
+        // Gradio auto-grows the textarea by writing an inline height, and while
+        // the editor is full-screen that measurement sees the overlay instead
+        // of the inline field. Put the pre-open height back, then let it grow
+        // only if the text really needs more room now.
+        if (height) area.style.height = height;
+        else area.style.removeProperty("height");
+        if (area.scrollHeight > area.clientHeight + 1) {
+            area.style.height = area.scrollHeight + "px";
+        }
+        const port = viewport();
+        if (port) {
+            port.removeEventListener("resize", layout);
+            port.removeEventListener("scroll", layout);
+        }
+        window.removeEventListener("resize", layout);
+    };
+
+    const openFullscreen = (area) => {
+        if (open || !isPhone()) return;
+        if (Date.now() - closedAt < SETTLE_MS) return;
+        open = {
+            area,
+            done: null,
+            // Gradio's own inline height, restored when the editor closes.
+            height: area.style.height,
+            overflow: document.body.style.overflow,
+        };
+        document.body.style.overflow = "hidden";
+
+        const done = document.createElement("button");
+        done.type = "button";
+        done.className = "fullscreen-text-done";
+        done.textContent = "Done";
+        // Keep focus on the textarea while the button is pressed, so the
+        // keyboard does not close before the click lands.
+        done.addEventListener("mousedown", (e) => e.preventDefault());
+        // Close directly rather than waiting for the focusout that blur() is
+        // supposed to fire: some mobile keyboards drop focus silently, and
+        // then the editor would never be dismissed.
+        done.addEventListener("click", () => {
+            area.blur();
+            close();
+        });
+        document.body.appendChild(done);
+        open.done = done;
+
+        area.classList.add(OPEN);
+        layout();
+        const port = viewport();
+        if (port) {
+            port.addEventListener("resize", layout);
+            port.addEventListener("scroll", layout);
+        }
+        window.addEventListener("resize", layout);
+    };
+
+    // Delegated, because Gradio re-renders the inputs when switching workflows.
+    document.addEventListener("focusin", (event) => {
+        const area = event.target;
+        if (!(area instanceof HTMLTextAreaElement)) return;
+        if (!area.closest("." + CLASS)) return;
+        openFullscreen(area);
+    });
+
+    document.addEventListener("focusout", (event) => {
+        if (open && event.target === open.area) close();
+    });
+
+    // Tapping outside the editor dismisses it too, even if focus was already
+    // dropped without a focusout (which is what leaves the field stuck open).
+    document.addEventListener("pointerdown", (event) => {
+        if (!open) return;
+        if (open.area.contains(event.target)) return;
+        if (open.done && open.done.contains(event.target)) return;
+        close();
+    }, true);
+}
 """
 
 
@@ -175,7 +340,8 @@ def _widget_kwargs(field: dict) -> dict:
     """Return the Gradio kwargs for a field, from its options block."""
     options = dict(field.get("options", {}))
     # These are registry-only keys, not Gradio kwargs.
-    options.pop("choices_source", None)
+    for key in ("choices_source", "fullscreen"):
+        options.pop(key, None)
     return options
 
 
@@ -192,6 +358,13 @@ def _build_candidate_widget(candidate: dict):
     options = _widget_kwargs(field)
 
     if widget == "textbox":
+        if field.get("options", {}).get("fullscreen"):
+            # Tag the textbox so FULLSCREEN_TEXT_JS can promote it to a
+            # full-screen editor on phones when it gains focus.
+            classes = options.get("elem_classes") or []
+            if isinstance(classes, str):
+                classes = [classes]
+            options["elem_classes"] = [*classes, FULLSCREEN_TEXT_CLASS]
         return gr.Textbox(
             label=label, value=value, interactive=True, **options
         )

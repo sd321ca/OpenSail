@@ -6,7 +6,8 @@
       "widget": "textbox",
       "options": {
         "placeholder": "Describe the image you want...",
-        "lines": 3
+        "lines": 3,
+        "fullscreen": true
       },
       "match": {
         "node_types": [
