@@ -24,12 +24,16 @@ SCHEDULERS_PATH = os.path.join(CONFIGS_DIR, "schedulers.json")
 SAMPLERS_EXAMPLE_PATH = os.path.join(CONFIGS_DIR, "samplers.example.json")
 SCHEDULERS_EXAMPLE_PATH = os.path.join(CONFIGS_DIR, "schedulers.example.json")
 CONSTANTS_PATH = os.path.join(CONFIGS_DIR, "constants.json")
+# Machine-specific server settings; copied from the example on first run.
+CONSTANTS_EXAMPLE_PATH = os.path.join(CONFIGS_DIR, "constants.example.json")
 # Per-workflow help notes shown in the Generate tab. Maps a workflow filename
 # to a Markdown string of tips / information.
 WORKFLOW_NOTES_PATH = os.path.join(CONFIGS_DIR, "workflow_notes.json")
 # Declarative registry of the Generate tab's input controls. Adding a new
 # entry here adds a new input to the UI without editing ui.py.
 FIELDS_PATH = os.path.join(CONFIGS_DIR, "fields.json")
+# Machine-specific input registry; copied from the example on first run.
+FIELDS_EXAMPLE_PATH = os.path.join(CONFIGS_DIR, "fields.example.json")
 # Per-workflow selection of node bindings shown in the Generate tab. Managed
 # by the Generate tab's input picker and editable by hand.
 WORKFLOW_FIELDS_PATH = os.path.join(CONFIGS_DIR, "workflow_fields.json")
@@ -97,6 +101,8 @@ def _create_from_example(path: str, example_path: str) -> None:
 
 _create_from_example(SAMPLERS_PATH, SAMPLERS_EXAMPLE_PATH)
 _create_from_example(SCHEDULERS_PATH, SCHEDULERS_EXAMPLE_PATH)
+_create_from_example(CONSTANTS_PATH, CONSTANTS_EXAMPLE_PATH)
+_create_from_example(FIELDS_PATH, FIELDS_EXAMPLE_PATH)
 
 
 def load_config() -> dict:
