@@ -12,9 +12,11 @@ from comfyui_ui import (
     MOBILE_CSS,
     build_ui,
 )
+from comfyui_ui.gradio_compat import apply_gradio_fixes
 
 
 def main() -> None:
+    apply_gradio_fixes()
     demo = build_ui()
     # Bind to all interfaces so other devices on the LAN can reach the UI.
     # share=False (the default) keeps it off the public internet.
