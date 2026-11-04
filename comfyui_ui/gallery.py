@@ -1,6 +1,8 @@
 """Gallery: list recent generated images and audio from ComfyUI's history."""
 
 import html
+import os
+import tempfile
 from urllib.parse import urlencode
 
 import gradio as gr
@@ -317,3 +319,65 @@ def refresh_video_gallery(client: ComfyUIClient, limit: int = 200) -> list:
     video player per item.
     """
     return video_gallery_items(client, limit=limit)
+
+
+# Local copies of gallery images used by the Generate tab's "Load from
+# Gallery" picker, keyed by (filename, subfolder, type). Generated outputs
+# never change, so a downloaded copy can be reused; re-downloading the whole
+# gallery every time the picker opens would make it slow.
+_PICKER_FILES: dict = {}
+
+# Cap the number of cached copies so a long-lived session cannot fill the temp
+# directory. The oldest entry is evicted first; files already shown in the
+# picker keep working because Gradio serves its own cached copy.
+_PICKER_CACHE_LIMIT = 240
+
+
+def _picker_file(client: ComfyUIClient, image: dict) -> str | None:
+    """Return a local file path for a gallery image, downloading it once."""
+    key = (
+        image["filename"],
+        image.get("subfolder", ""),
+        image.get("type", "output"),
+    )
+    cached = _PICKER_FILES.get(key)
+    if cached and os.path.exists(cached):
+        return cached
+
+    try:
+        content, _content_type = client.fetch_image_bytes(image)
+    except Exception:  # noqa: BLE001
+        # Skip images that can no longer be fetched (e.g. temp files that have
+        # been cleaned up) instead of failing the whole picker.
+        return None
+
+    if len(_PICKER_FILES) >= _PICKER_CACHE_LIMIT:
+        oldest = next(iter(_PICKER_FILES))
+        try:
+            os.remove(_PICKER_FILES.pop(oldest))
+        except OSError:
+            pass
+
+    suffix = os.path.splitext(image["filename"])[1] or ".png"
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "wb") as f:
+        f.write(content)
+    _PICKER_FILES[key] = path
+    return path
+
+
+def gallery_picker_items(client: ComfyUIClient, limit: int = 60) -> list:
+    """Return (image_path, caption) tuples for the Load-from-Gallery picker.
+
+    The images are downloaded server-side (rather than linked to ComfyUI's
+    /view URL) so the picker works even when the browser cannot reach ComfyUI
+    directly, matching the audio and video galleries. ``limit`` caps how many
+    history entries are scanned, keeping the first open of the picker quick.
+    """
+    items = []
+    for image in list_gallery_images(client, limit=limit):
+        path = _picker_file(client, image)
+        if path is None:
+            continue
+        items.append((path, image["filename"]))
+    return items

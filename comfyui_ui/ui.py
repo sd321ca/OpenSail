@@ -32,6 +32,7 @@ from .fields import (
 )
 from .gallery import (
     IMAGE_PROXY_ROUTE,
+    gallery_picker_items,
     generated_image_html,
     refresh_audio_gallery,
     refresh_gallery_html,
@@ -671,6 +672,57 @@ def _layout_outputs(
     return ordered
 
 
+# ---------------------------------------------------------------------------
+# Load-from-Gallery picker
+# ---------------------------------------------------------------------------
+
+
+def open_gallery_picker(client, slot_index):
+    """Open the gallery picker for one image input slot.
+
+    Returns the slot the click belongs to, the gallery's ``(path, caption)``
+    items (stored in a State so a thumbnail's "Use this image" button can map
+    its index back to a file), the hint shown above the thumbnails, and the
+    update that opens the popup.
+    """
+    items = gallery_picker_items(client)
+    if items:
+        hint = (
+            "Press **Use this image** under a thumbnail to use it as the "
+            "input for this slot."
+        )
+    else:
+        hint = (
+            "No images found in the gallery yet. Generate an image first, or "
+            "upload one in the image editor."
+        )
+    return (
+        slot_index,
+        items,
+        hint,
+        gr.update(visible=True),
+    )
+
+
+def load_gallery_image(index, slot_index, items, slot_count: int):
+    """Load one gallery image into its image input slot.
+
+    Returns one update per image input (unchanged for the other slots) and the
+    update that closes the picker. ``items`` are the picker's ``(path,
+    caption)`` tuples; ``index`` is the thumbnail whose path is set as the
+    editor's value, so it becomes that slot's input image.
+    """
+    updates = [gr.update() for _ in range(slot_count)]
+    if (
+        isinstance(index, int)
+        and 0 <= index < len(items or [])
+        and isinstance(slot_index, int)
+        and 0 <= slot_index < slot_count
+    ):
+        updates[slot_index] = gr.update(value=items[index][0])
+    return (*updates, gr.update(visible=False))
+
+
 def render_node_controls(
     state,
     client,
@@ -908,15 +960,27 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                         # state error.
                         with gr.Column(visible=False) as image_group:
                             image_heading = gr.Markdown(
-                                "### Input images (upload or draw a sketch)",
+                                "### Input images "
+                                "(upload, draw a sketch, or load from the "
+                                "gallery)",
                                 visible=False,
                             )
                             image_inputs = []
                             image_slots = []
                             image_labels = []
+                            gallery_buttons = []
                             for i in range(MAX_IMAGE_INPUTS):
                                 with gr.Column(visible=False) as slot:
-                                    slot_label = gr.Markdown()
+                                    with gr.Row():
+                                        slot_label = gr.Markdown(scale=4)
+                                        # Pick an existing gallery image as
+                                        # this slot's input (an alternative to
+                                        # uploading or drawing one).
+                                        gallery_btn = gr.Button(
+                                            "Load from Gallery",
+                                            size="sm",
+                                            scale=0,
+                                        )
                                     img = gr.ImageEditor(
                                         label=f"Image {i + 1}",
                                         show_label=False,
@@ -926,6 +990,7 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                                 image_slots.append(slot)
                                 image_labels.append(slot_label)
                                 image_inputs.append(img)
+                                gallery_buttons.append(gallery_btn)
 
                         # Reference audio for music-cover workflows (the
                         # workflow's LoadAudio node).
@@ -1026,6 +1091,77 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                             )
                             close_fields_btn = gr.Button("Close")
 
+                # Popup gallery picker for the "Load from Gallery" buttons
+                # beside the image inputs. The thumbnails come from ComfyUI's
+                # history; pressing "Use this image" loads that image into the
+                # slot which opened the popup. Kept out of the main layout like
+                # the field picker. gallery_target is the slot index of the slot
+                # that opened it and gallery_items the thumbnails it shows.
+                gallery_target = gr.State(-1)
+                gallery_items = gr.State([])
+                with gr.Column(
+                    visible=False, elem_classes=["gallery-picker-overlay"]
+                ) as gallery_modal:
+                    # A plain Column (not a Group) carries the dialog class:
+                    # Group renders two nested divs, and both would receive the
+                    # fixed-position dialog styling.
+                    with gr.Column(elem_classes=["gallery-picker-dialog"]):
+                        gr.Markdown("### Load from gallery")
+                        gallery_picker_status = gr.Markdown()
+
+                        # One thumbnail per gallery image, each with its own
+                        # button. (A Gallery's select event is avoided: it
+                        # stops the image inputs above from hiding when a
+                        # workflow without an image input is selected.)
+                        def _gallery_use_handler(index):
+                            """Return a click handler that loads thumbnail index."""
+
+                            def use(slot_index, items):
+                                return load_gallery_image(
+                                    index,
+                                    slot_index,
+                                    items,
+                                    len(image_inputs),
+                                )
+
+                            return use
+
+                        @gr.render(inputs=[gallery_items])
+                        def render_gallery_picker(items):
+                            if not items:
+                                return
+                            for start in range(0, len(items), 4):
+                                with gr.Row():
+                                    for offset, (path, caption) in enumerate(
+                                        items[start : start + 4]
+                                    ):
+                                        with gr.Column(min_width=180):
+                                            gr.Image(
+                                                value=path,
+                                                label=caption,
+                                                interactive=False,
+                                                height=150,
+                                            )
+                                            use_btn = gr.Button(
+                                                "Use this image", size="sm"
+                                            )
+                                            use_btn.click(
+                                                fn=_gallery_use_handler(
+                                                    start + offset
+                                                ),
+                                                inputs=[
+                                                    gallery_target,
+                                                    gallery_items,
+                                                ],
+                                                outputs=[
+                                                    *image_inputs,
+                                                    gallery_modal,
+                                                ],
+                                            )
+
+                        with gr.Row():
+                            close_gallery_btn = gr.Button("Close")
+
                 outputs = {
                     "image": output_image_html,
                     "audio": output_audio,
@@ -1081,6 +1217,26 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                     fn=update_layout,
                     inputs=[workflow_name],
                     outputs=layout_outputs,
+                )
+
+                # Open the gallery picker for the image slot whose "Load from
+                # Gallery" button was pressed.
+                for slot_index, gallery_btn in enumerate(gallery_buttons):
+                    gallery_btn.click(
+                        fn=partial(open_gallery_picker, client, slot_index),
+                        inputs=None,
+                        outputs=[
+                            gallery_target,
+                            gallery_items,
+                            gallery_picker_status,
+                            gallery_modal,
+                        ],
+                    )
+
+                close_gallery_btn.click(
+                    fn=lambda: gr.update(visible=False),
+                    inputs=None,
+                    outputs=[gallery_modal],
                 )
 
                 # Open the field picker popup.

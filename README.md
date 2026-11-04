@@ -147,7 +147,9 @@ Environment variables set outside the file take priority over the `.env` file.
     output a video player.
   - Workflows with `LoadImage` nodes (e.g. `Image Edit - 1 Input.json`) show
     one **Input images** slot per node. Each slot is an image editor, so you
-    can upload a file **or draw a sketch** to use as the input image.
+    can upload a file **or draw a sketch** to use as the input image, or press
+    **Load from Gallery** beside the slot to pick one of the images you have
+    already generated (press **Use this image** under a thumbnail).
 
 <img width="692" height="565" alt="workflow config" src="https://github.com/user-attachments/assets/4cd3ac9f-5d5b-4aef-825c-d691351d2177" />
 
@@ -196,7 +198,7 @@ detects the workflow kind automatically:
 - Workflows with a `LoadAudio` node (e.g. `Music - Cover.json`) show a
   **Reference audio** input for uploading the source song.
 - Workflows with a `LoadImage` node show one **Input images** slot per node,
-  where you can upload an image or draw a sketch.
+  where you can upload an image, draw a sketch, or load one from the gallery.
 - Video workflows expose the `RandomNoise` seed, the `BasicScheduler` steps /
   scheduler, and the `PrimitiveFloat` duration `value` as node candidates.
 
