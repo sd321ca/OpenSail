@@ -1345,20 +1345,30 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                 # re-rendered without re-downloading on every interaction.
                 video_items = gr.State([])
 
-                # Render one video player per item, laid out in rows of two.
+                # Render one video player per item, laid out in rows of three.
+                # A small fixed height keeps each tile compact so several fit on
+                # screen at once.
                 @gr.render(inputs=[video_items])
                 def render_video_gallery(items):
                     if not items:
                         gr.Markdown("No videos found.")
                         return
-                    for start in range(0, len(items), 2):
+                    columns = 3
+                    for start in range(0, len(items), columns):
+                        chunk = items[start : start + columns]
                         with gr.Row():
-                            for path, caption in items[start : start + 2]:
-                                with gr.Column(min_width=280):
+                            for path, caption in chunk:
+                                with gr.Column(min_width=200):
                                     gr.Video(
                                         value=path,
                                         label=caption,
+                                        height=180,
                                     )
+                            # Empty spacers stop a short last row from
+                            # stretching its tiles across the full width.
+                            for _ in range(columns - len(chunk)):
+                                with gr.Column(min_width=200):
+                                    pass
 
                 video_refresh_btn.click(
                     fn=lambda: refresh_video_gallery(client),
