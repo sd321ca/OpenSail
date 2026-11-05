@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 import gradio as gr
 
 from .audio_meta import extract_audio_metadata, format_audio_caption
-from .comfy_client import ComfyUIClient
+from .comfy_client import ComfyUIClient, is_video_filename
 from .config import COMFY_URL
 
 # Route on the Gradio app that proxies ComfyUI images (see ui.build_ui). The
@@ -25,15 +25,6 @@ def _proxy_url(image: dict) -> str:
         "type": image.get("type", "output"),
     }
     return f"{IMAGE_PROXY_ROUTE}?" + urlencode(params)
-
-# Video file extensions. ComfyUI's SaveVideo node reports its result under the
-# "images" output key, so these must be filtered out of the image gallery.
-VIDEO_EXTENSIONS = (".mp4", ".webm", ".mkv", ".mov", ".avi")
-
-
-def _is_video(filename: str) -> bool:
-    """Return True if a filename looks like a video file."""
-    return filename.lower().endswith(VIDEO_EXTENSIONS)
 
 
 def _sorted_history(history: dict) -> list:
@@ -92,7 +83,7 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
             for image_ref in node_output.get("images", []):
                 # SaveVideo reports its result under "images"; skip those so
                 # videos do not show up as broken images in the gallery.
-                if _is_video(image_ref.get("filename", "")):
+                if is_video_filename(image_ref.get("filename", "")):
                     continue
                 images.append(
                     {
@@ -167,7 +158,7 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
 
         for node_output in outputs.values():
             for video_ref in node_output.get("images", []):
-                if not _is_video(video_ref.get("filename", "")):
+                if not is_video_filename(video_ref.get("filename", "")):
                     continue
                 videos.append(
                     {

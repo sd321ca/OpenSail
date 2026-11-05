@@ -27,6 +27,18 @@ class ComfyUIError(RuntimeError):
     """Raised when ComfyUI returns an error or cannot be reached."""
 
 
+# Video file extensions. ComfyUI's SaveVideo node reports its result under the
+# "images" output key (with an "animated" flag), so videos must be told apart
+# from real images by their filename. LoadVideo also reports its input file
+# under the same key, which is why the output type matters too.
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mkv", ".mov", ".avi")
+
+
+def is_video_filename(filename: str) -> bool:
+    """Return True if a filename looks like a video file."""
+    return (filename or "").lower().endswith(VIDEO_EXTENSIONS)
+
+
 class ComfyUIClient:
     """Client for a running ComfyUI instance."""
 
@@ -196,8 +208,15 @@ class ComfyUIClient:
     def wait_for_image(
         self, prompt_id: str, client_id: str, timeout: float = 300.0
     ) -> dict:
-        """Poll history until the prompt finishes; return the first image ref."""
-        return self.wait_for_output(prompt_id, client_id, "images", timeout)
+        """Poll history until the prompt finishes; return the first image ref.
+
+        Videos are skipped: ComfyUI records LoadVideo's input file under the
+        same "images" key, so the input video can otherwise be mistaken for the
+        result (for example in Extract Last Frame).
+        """
+        return self.wait_for_output(
+            prompt_id, client_id, "images", timeout, video=False
+        )
 
     def wait_for_audio(
         self, prompt_id: str, client_id: str, timeout: float = 600.0
@@ -212,9 +231,12 @@ class ComfyUIClient:
 
         ComfyUI's SaveVideo node reports its result under the "images" key
         (with an "animated" flag), not a "video" key, so the video file ref is
-        read from there.
+        read from there. Image refs and the input file reported by LoadVideo
+        are skipped in favour of the generated output.
         """
-        return self.wait_for_output(prompt_id, client_id, "images", timeout)
+        return self.wait_for_output(
+            prompt_id, client_id, "images", timeout, video=True
+        )
 
     def wait_for_output(
         self,
@@ -222,11 +244,19 @@ class ComfyUIClient:
         client_id: str,
         output_key: str,
         timeout: float = 300.0,
+        video: bool | None = None,
     ) -> dict:
         """Poll history until the prompt finishes; return the first output ref.
 
         ``output_key`` is the key under a node's output that holds the result,
         e.g. "images" for image workflows or "audio" for audio workflows.
+        ``video`` filters "images" results: True keeps only video files, False
+        keeps only images, and None keeps everything (used for audio).
+
+        Uploaded inputs are reported under the same keys as generated results
+        (LoadVideo, for example, appears before the PreviewImage/SaveVideo
+        node). References whose type is "input" are therefore only used as a
+        last resort, so the actual output wins.
         """
         start = time.time()
         while time.time() - start < timeout:
@@ -238,10 +268,21 @@ class ComfyUIClient:
 
             if prompt_id in history:
                 outputs = history[prompt_id].get("outputs", {})
+                matches = []
                 for node_output in outputs.values():
-                    results = node_output.get(output_key)
-                    if results:
-                        return results[0]
+                    for ref in node_output.get(output_key) or []:
+                        if video is not None and is_video_filename(
+                            ref.get("filename", "")
+                        ) != video:
+                            continue
+                        matches.append(ref)
+
+                if matches:
+                    for ref in matches:
+                        if ref.get("type", "output") != "input":
+                            return ref
+                    return matches[0]
+
                 raise ComfyUIError(
                     f"Workflow finished but produced no {output_key}."
                 )
@@ -362,15 +403,35 @@ class ComfyUIClient:
         ComfyUI's /upload/image endpoint accepts any file type, so it is used
         here for audio inputs (e.g. a music-cover reference song).
         """
-        filename = f"{prefix}_{uuid.uuid4().hex}{os.path.splitext(audio_path)[1]}"
-        with open(audio_path, "rb") as f:
+        return self.upload_file(audio_path, prefix, timeout=120)
+
+    def upload_video(self, video_path: str, prefix: str = "input") -> str:
+        """Upload a video file to ComfyUI and return the stored filename.
+
+        ComfyUI's /upload/image endpoint accepts any file type, so it is used
+        here for video inputs (e.g. a LoadVideo node).
+        """
+        # Videos can be much larger than images, so allow more time.
+        return self.upload_file(video_path, prefix, timeout=300)
+
+    def upload_file(
+        self, file_path: str, prefix: str = "input", timeout: float = 120
+    ) -> str:
+        """Upload any file to ComfyUI's input folder and return its name.
+
+        The filename is unique per upload, keeping the source extension so
+        ComfyUI can detect the format. ComfyUI returns the stored name and an
+        optional subfolder, which are combined into the value node inputs use.
+        """
+        filename = f"{prefix}_{uuid.uuid4().hex}{os.path.splitext(file_path)[1]}"
+        with open(file_path, "rb") as f:
             files = {"image": (filename, f, "application/octet-stream")}
             data = {"overwrite": "true"}
             resp = requests.post(
                 f"{self.base_url}/upload/image",
                 files=files,
                 data=data,
-                timeout=120,
+                timeout=timeout,
             )
         resp.raise_for_status()
         result = resp.json()

@@ -37,6 +37,7 @@ from .gallery import (
     refresh_audio_gallery,
     refresh_gallery_html,
     refresh_video_gallery,
+    video_gallery_items,
 )
 from .notes import build_notes_editor, reset_notes_editor
 from .presets import (
@@ -51,6 +52,7 @@ from .workflows import (
     get_workflow_kind,
     list_load_audio_nodes,
     list_load_image_nodes,
+    list_load_video_nodes,
     list_node_candidates,
     list_workflows,
 )
@@ -176,6 +178,7 @@ def generate(
     binding_values: dict,
     randomize_seed: bool,
     reference_audio: str | None,
+    reference_video: str | None,
     cancel_flag: dict | None = None,
     progress: gr.Progress = gr.Progress(),
     *image_inputs,
@@ -190,7 +193,8 @@ def generate(
     same order as ``list_load_image_nodes(workflow_name)``. Each may be either
     an uploaded image or a sketch drawn in the built-in editor.
     ``reference_audio`` is the uploaded reference song for music-cover
-    workflows (LoadAudio nodes).
+    workflows (LoadAudio nodes) and ``reference_video`` is the uploaded video
+    for workflows with a LoadVideo node.
 
     This is a generator so the UI can show a live progress bar. It yields the
     current ``(image_html, audio, video)`` outputs on each update (initially
@@ -249,11 +253,21 @@ def generate(
                 reference_audio, prefix=f"node_{audio_nodes[0][0]}"
             )
 
+        # Upload the input video for workflows with a LoadVideo node (for
+        # example Extract Last Frame or the video upscaler).
+        video_filenames = {}
+        video_nodes = list_load_video_nodes(workflow_name)
+        if video_nodes and reference_video:
+            video_filenames[video_nodes[0][0]] = client.upload_video(
+                reference_video, prefix=f"node_{video_nodes[0][0]}"
+            )
+
         workflow = build_workflow_from_bindings(
             workflow_name=workflow_name,
             binding_values=binding_values,
             image_filenames=image_filenames,
             audio_filenames=audio_filenames,
+            video_filenames=video_filenames,
         )
 
         client_id = str(uuid.uuid4())
@@ -614,12 +628,12 @@ def update_workflow_layout(
     image_slots,
     workflow_name: str,
 ):
-    """Show/hide the image/audio inputs and the correct output component.
+    """Show/hide the image/audio/video inputs and the correct output component.
 
     Visibility is applied to wrapper Columns rather than to the ImageEditor /
-    Audio components themselves: layout containers update reliably, while an
-    ImageEditor visibility update can leave the editor visible and raise a
-    frontend state error.
+    Audio / Video components themselves: layout containers update reliably,
+    while an ImageEditor visibility update can leave the editor visible and
+    raise a frontend state error.
     """
     kind = get_workflow_kind(workflow_name)
     is_audio = kind == KIND_AUDIO
@@ -629,6 +643,7 @@ def update_workflow_layout(
 
     image_nodes = list_load_image_nodes(workflow_name)
     audio_nodes = list_load_audio_nodes(workflow_name)
+    video_nodes = list_load_video_nodes(workflow_name)
 
     has_images = bool(image_nodes)
     updates.append(gr.update(visible=has_images))
@@ -646,6 +661,10 @@ def update_workflow_layout(
     updates.append(gr.update(visible=has_audio))
     updates.append(gr.update(visible=has_audio))
 
+    has_video = bool(video_nodes)
+    updates.append(gr.update(visible=has_video))
+    updates.append(gr.update(visible=has_video))
+
     updates.append(gr.update(visible=not is_audio and not is_video))
     updates.append(gr.update(visible=is_audio))
     updates.append(gr.update(visible=is_video))
@@ -659,6 +678,8 @@ def _layout_outputs(
     image_heading,
     audio_group,
     audio_heading,
+    video_group,
+    video_heading,
     outputs,
 ):
     """Return components updated by ``update_workflow_layout``, in order."""
@@ -666,6 +687,7 @@ def _layout_outputs(
     for i in range(len(image_slots)):
         ordered.extend([image_slots[i], image_labels[i]])
     ordered.extend([audio_group, audio_heading])
+    ordered.extend([video_group, video_heading])
     ordered.append(outputs["image"])
     ordered.append(outputs["audio"])
     ordered.append(outputs["video"])
@@ -723,12 +745,46 @@ def load_gallery_image(index, slot_index, items, slot_count: int):
     return (*updates, gr.update(visible=False))
 
 
+def open_video_gallery_picker(client):
+    """Open the gallery picker for the input-video slot.
+
+    Returns the gallery's ``(path, caption)`` items (stored in a State so a
+    player's "Use this video" button can map its index back to a file), the
+    hint shown above the players, and the update that opens the popup.
+    """
+    items = video_gallery_items(client, limit=60)
+    if items:
+        hint = (
+            "Press **Use this video** under a player to use it as the input "
+            "video."
+        )
+    else:
+        hint = (
+            "No videos found in the gallery yet. Generate or upscale a video "
+            "first, or upload one above."
+        )
+    return items, hint, gr.update(visible=True)
+
+
+def load_gallery_video(index, items):
+    """Load one gallery video into the input-video slot.
+
+    Returns the update for the video input and the update that closes the
+    picker. ``items`` are the picker's ``(path, caption)`` tuples; ``index`` is
+    the player whose path is set as the input video.
+    """
+    if isinstance(index, int) and 0 <= index < len(items or []):
+        return gr.update(value=items[index][0]), gr.update(visible=False)
+    return gr.update(), gr.update(visible=False)
+
+
 def render_node_controls(
     state,
     client,
     workflow_name,
     image_inputs,
     audio_inputs,
+    video_inputs,
     cancel_flag,
     outputs,
     input_values_state,
@@ -821,6 +877,7 @@ def render_node_controls(
                 values_state,
                 randomize_seed,
                 audio_inputs[0],
+                video_inputs[0],
                 cancel_flag,
                 *image_inputs,
             ],
@@ -1005,6 +1062,26 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                                 )
                             ]
 
+                        # Input video for workflows with a LoadVideo node
+                        # (for example Extract Last Frame or the video
+                        # upscaler). Gradio returns the upload as a filepath,
+                        # which is sent to ComfyUI before queueing the prompt.
+                        with gr.Column(visible=False) as video_group:
+                            with gr.Row():
+                                video_heading = gr.Markdown(
+                                    "### Input video", scale=4
+                                )
+                                # Pick an existing gallery video as the input
+                                # (an alternative to uploading one).
+                                video_gallery_btn = gr.Button(
+                                    "Load from Gallery",
+                                    size="sm",
+                                    scale=0,
+                                )
+                            video_inputs = [
+                                gr.Video(label="Video", sources=["upload"])
+                            ]
+
                         # Shared flag the Stop button sets and the generate
                         # callback polls to abort a running generation.
                         cancel_flag = gr.State({"cancel": False})
@@ -1017,6 +1094,7 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                                 workflow_name,
                                 image_inputs,
                                 audio_inputs,
+                                video_inputs,
                                 cancel_flag,
                                 outputs,
                                 input_values_state,
@@ -1162,6 +1240,66 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                         with gr.Row():
                             close_gallery_btn = gr.Button("Close")
 
+                # Popup gallery picker for the video input's "Load from
+                # Gallery" button. It mirrors the image picker above, but shows
+                # video players and loads the chosen video into the input-video
+                # component.
+                video_gallery_state = gr.State([])
+                with gr.Column(
+                    visible=False, elem_classes=["gallery-picker-overlay"]
+                ) as video_gallery_modal:
+                    with gr.Column(elem_classes=["gallery-picker-dialog"]):
+                        gr.Markdown("### Load video from gallery")
+                        video_gallery_status = gr.Markdown()
+
+                        def _video_gallery_use_handler(index):
+                            """Return a click handler that loads player index."""
+
+                            def use(items):
+                                return load_gallery_video(index, items)
+
+                            return use
+
+                        @gr.render(inputs=[video_gallery_state])
+                        def render_video_gallery_picker(items):
+                            if not items:
+                                return
+                            # Rows of three keep each player compact; empty
+                            # spacers stop a short last row from stretching.
+                            columns = 3
+                            for start in range(0, len(items), columns):
+                                chunk = items[start : start + columns]
+                                with gr.Row():
+                                    for offset, (path, caption) in enumerate(
+                                        chunk
+                                    ):
+                                        with gr.Column(min_width=240):
+                                            gr.Video(
+                                                value=path,
+                                                label=caption,
+                                                interactive=False,
+                                                height=180,
+                                            )
+                                            use_video_btn = gr.Button(
+                                                "Use this video", size="sm"
+                                            )
+                                            use_video_btn.click(
+                                                fn=_video_gallery_use_handler(
+                                                    start + offset
+                                                ),
+                                                inputs=[video_gallery_state],
+                                                outputs=[
+                                                    video_inputs[0],
+                                                    video_gallery_modal,
+                                                ],
+                                            )
+                                    for _ in range(columns - len(chunk)):
+                                        with gr.Column(min_width=240):
+                                            pass
+
+                        with gr.Row():
+                            close_video_gallery_btn = gr.Button("Close")
+
                 outputs = {
                     "image": output_image_html,
                     "audio": output_audio,
@@ -1175,6 +1313,8 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                     image_heading,
                     audio_group,
                     audio_heading,
+                    video_group,
+                    video_heading,
                     outputs,
                 )
                 update_layout = partial(
@@ -1237,6 +1377,23 @@ def build_ui(client: ComfyUIClient | None = None) -> gr.Blocks:
                     fn=lambda: gr.update(visible=False),
                     inputs=None,
                     outputs=[gallery_modal],
+                )
+
+                # Open the gallery picker for the input-video slot, and close
+                # it when the user is done.
+                video_gallery_btn.click(
+                    fn=partial(open_video_gallery_picker, client),
+                    inputs=None,
+                    outputs=[
+                        video_gallery_state,
+                        video_gallery_status,
+                        video_gallery_modal,
+                    ],
+                )
+                close_video_gallery_btn.click(
+                    fn=lambda: gr.update(visible=False),
+                    inputs=None,
+                    outputs=[video_gallery_modal],
                 )
 
                 # Open the field picker popup.

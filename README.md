@@ -150,6 +150,11 @@ Environment variables set outside the file take priority over the `.env` file.
     can upload a file **or draw a sketch** to use as the input image, or press
     **Load from Gallery** beside the slot to pick one of the images you have
     already generated (press **Use this image** under a thumbnail).
+  - Workflows with a `LoadVideo` node (e.g. `Extract Last Frame.json` or
+    `Video - Upscale.json`) show an **Input video** upload. The file is sent to
+    ComfyUI and used as that node's video before the workflow runs. Press
+    **Load from Gallery** beside the heading to pick one of the videos you have
+    already generated instead of uploading a file.
 
 <img width="692" height="565" alt="workflow config" src="https://github.com/user-attachments/assets/4cd3ac9f-5d5b-4aef-825c-d691351d2177" />
 
@@ -197,6 +202,8 @@ detects the workflow kind automatically:
   skipped so the graph is not broken.
 - Workflows with a `LoadAudio` node (e.g. `Music - Cover.json`) show a
   **Reference audio** input for uploading the source song.
+- Workflows with a `LoadVideo` node (e.g. `Extract Last Frame.json`) show an
+  **Input video** upload. The uploaded file replaces the node's `file` input.
 - Workflows with a `LoadImage` node show one **Input images** slot per node,
   where you can upload an image, draw a sketch, or load one from the gallery.
 - Video workflows expose the `RandomNoise` seed, the `BasicScheduler` steps /
@@ -376,10 +383,12 @@ UI labels come from the workflow node titles, not from the field registry.
 The node picker derives candidates from these specs: every workflow input
 with a literal value that one of the widgets can edit is selectable, while
 links are skipped. Node type, value type and input keys decide which field
-definition supplies the widget and options. Inputs that match no
-field are hidden unless `show_unmatched_node_inputs` is enabled in
-`constants.json`; when enabled they get a generic textbox / number / checkbox
-based on their value type.
+definition supplies the widget and options. Inputs that are supplied by the
+dedicated upload controls (`LoadImage.image`, `LoadAudio.audio` and
+`LoadVideo.file`) are not listed, because the Generate tab sets them from the
+uploaded file. Inputs that match no field are hidden unless
+`show_unmatched_node_inputs` is enabled in `constants.json`; when enabled they
+get a generic textbox / number / checkbox based on their value type.
 
 ### `workflow_fields.json`
 

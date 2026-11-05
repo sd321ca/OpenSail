@@ -64,6 +64,18 @@ MUSIC_MODES = ["full", "instrumental", "vocals", "melody"]
 
 # --- Video workflows ------------------------------------------------------
 VIDEO_OUTPUT_NODE_TYPES = ("SaveVideo",)
+# Video input node used by workflows that take an existing video (for example
+# Extract Last Frame, or the video upscaler).
+LOAD_VIDEO_NODE_TYPES = ("LoadVideo",)
+
+# Node inputs that are supplied by a dedicated upload control on the Generate
+# tab instead of an editable field in the node picker. Skipping them keeps the
+# filename textbox out of the picker: the upload sets the value at queue time.
+UPLOAD_INPUT_KEYS = {
+    "LoadImage": "image",
+    "LoadAudio": "audio",
+    "LoadVideo": "file",
+}
 
 # Workflow kinds, used to decide which controls and output component to show.
 KIND_IMAGE = "image"

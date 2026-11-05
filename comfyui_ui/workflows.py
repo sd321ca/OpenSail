@@ -17,8 +17,10 @@ from .config import (
     KIND_VIDEO,
     LOAD_AUDIO_NODE_TYPES,
     LOAD_IMAGE_NODE_TYPES,
+    LOAD_VIDEO_NODE_TYPES,
     MUSIC_NODE_TYPES,
     SHOW_UNMATCHED_NODE_INPUTS,
+    UPLOAD_INPUT_KEYS,
     VIDEO_OUTPUT_NODE_TYPES,
     WORKFLOWS_DIR,
 )
@@ -109,6 +111,23 @@ def list_load_audio_nodes(workflow_name: str) -> list:
     nodes = []
     for node_id in find_nodes(workflow, LOAD_AUDIO_NODE_TYPES):
         title = workflow[node_id].get("_meta", {}).get("title") or f"Audio {node_id}"
+        nodes.append((node_id, title))
+    return nodes
+
+
+def list_load_video_nodes(workflow_name: str) -> list:
+    """Return a list of (node_id, label) for LoadVideo nodes in a workflow.
+
+    Used by workflows that take an existing video as input (for example
+    Extract Last Frame, or the video upscaler). The label is derived from the
+    node's _meta title (falling back to the node ID).
+    """
+    if not workflow_name:
+        return []
+    workflow = load_workflow(workflow_name)
+    nodes = []
+    for node_id in find_nodes(workflow, LOAD_VIDEO_NODE_TYPES):
+        title = workflow[node_id].get("_meta", {}).get("title") or f"Video {node_id}"
         nodes.append((node_id, title))
     return nodes
 
@@ -211,10 +230,14 @@ def list_node_candidates(workflow_name: str) -> list:
     workflow = load_workflow(workflow_name)
     candidates = []
     for node_id, node in workflow.items():
+        class_type = node.get("class_type", "")
+        # Inputs backed by a dedicated upload control (image / audio / video)
+        # are set when the prompt is queued, so they are not offered here.
+        upload_key = UPLOAD_INPUT_KEYS.get(class_type)
         for input_key, value in node.get("inputs", {}).items():
             # Links are not literal values; editing them would break the
             # workflow's node graph.
-            if isinstance(value, list):
+            if isinstance(value, list) or input_key == upload_key:
                 continue
             field = _candidate_field(node, input_key, value)
             if field is None:
@@ -227,7 +250,7 @@ def list_node_candidates(workflow_name: str) -> list:
                     "id": f"{node_id}|{input_key}",
                     "node": node_id,
                     "input": input_key,
-                    "class_type": node.get("class_type", ""),
+                    "class_type": class_type,
                     "title": title,
                     "field": field["key"],
                     "field_def": field,
@@ -280,11 +303,13 @@ def build_workflow_from_bindings(
     binding_values: dict,
     image_filenames: dict | None = None,
     audio_filenames: dict | None = None,
+    video_filenames: dict | None = None,
 ) -> dict:
     """Return a workflow with node-binding values injected.
 
     ``binding_values`` maps ``node_id|input_key`` IDs to values. Stale
-    bindings are ignored. LoadImage / LoadAudio uploads are applied as usual.
+    bindings are ignored. LoadImage / LoadAudio / LoadVideo uploads are applied
+    as usual.
     """
     workflow = load_workflow(workflow_name)
 
@@ -308,5 +333,10 @@ def build_workflow_from_bindings(
         for node_id, filename in audio_filenames.items():
             if node_id in workflow and filename:
                 workflow[node_id]["inputs"]["audio"] = filename
+
+    if video_filenames:
+        for node_id, filename in video_filenames.items():
+            if node_id in workflow and filename:
+                workflow[node_id]["inputs"]["file"] = filename
 
     return workflow
