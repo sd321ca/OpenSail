@@ -10,6 +10,27 @@ import {
 } from "../ui.js";
 
 const STORAGE_KEY = "opensail.chat.settings.v1";
+// Engine id for server-side speech (audio.cpp), not a model id.
+const SERVER_TTS_ENGINE = "pocket";
+
+let templatePromise = null;
+
+function loadChatTemplate() {
+  if (!templatePromise) {
+    templatePromise = fetch(new URL("./chat.html", import.meta.url))
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Could not load the chat layout (${response.status}).`);
+        }
+        return response.text();
+      })
+      .catch((error) => {
+        templatePromise = null;
+        throw error;
+      });
+  }
+  return templatePromise;
+}
 
 function loadSettings(boot) {
   let saved = {};
@@ -55,119 +76,18 @@ export async function renderChat(root, ctx) {
     .join("");
 
   const ttsModels = boot.tts_models || [];
+  const speechModel =
+    ttsModels.find((model) => model.id === boot.default_speech_model) ||
+    ttsModels[0] ||
+    null;
 
-  root.innerHTML = `
-    <div class="flex min-h-[calc(100dvh-8.5rem)] flex-col gap-5">
-      <div class="grid items-start gap-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        <section class="card">
-          <div class="card-header">
-            <div class="flex items-center gap-2.5">
-              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/10 text-sky-300">${icon("cpu", "h-4 w-4")}</span>
-              <div>
-                <h2 class="card-title">Model</h2>
-                <p class="card-subtitle">llama-server runs locally</p>
-              </div>
-            </div>
-            <span class="chip ${boot.chat_loaded ? "chip-success" : ""}" data-model-chip>${boot.chat_loaded ? "Loaded" : "Idle"}</span>
-          </div>
-          <div class="space-y-3 p-4">
-            <select class="select" data-model aria-label="Chat model">
-              ${modelOptions || '<option value="">No models configured</option>'}
-            </select>
-            <div class="flex gap-2">
-              <button class="btn-secondary btn-xs flex-1" data-load>${icon("play", "h-3.5 w-3.5")} Load</button>
-              <button class="btn-ghost btn-xs flex-1" data-unload>${icon("stop", "h-3.5 w-3.5")} Unload</button>
-            </div>
-            <p class="rounded-lg border border-white/[0.05] bg-white/[0.02] px-3 py-2 text-[11px] leading-5 text-slate-500">Unloading frees VRAM before running a ComfyUI generation.</p>
-          </div>
-        </section>
-
-        <section class="card">
-          <div class="card-header">
-            <div class="flex items-center gap-2.5">
-              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">${icon("settings", "h-4 w-4")}</span>
-              <div>
-                <h2 class="card-title">Chat settings</h2>
-                <p class="card-subtitle">Saved in this browser</p>
-              </div>
-            </div>
-          </div>
-          <div class="space-y-4 p-4">
-            <div>
-              <label class="label" for="chat-system-prompt">System prompt</label>
-              <textarea id="chat-system-prompt" class="textarea text-xs" rows="4" data-system placeholder="Instructions prepended to the conversation.">${escapeHtml(settings.systemPrompt)}</textarea>
-            </div>
-            <label class="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
-              <span><span class="block text-sm font-medium text-slate-200">Enable thinking</span><span class="text-[11px] text-slate-500">Show reasoning before the answer</span></span>
-              <span class="switch"><input type="checkbox" data-thinking ${settings.thinking ? "checked" : ""} /><span></span></span>
-            </label>
-            <div>
-              <label class="label" for="chat-engine">Speak replies with</label>
-              <select id="chat-engine" class="select" data-engine>
-                <option value="off" ${settings.engine === "off" ? "selected" : ""}>Off</option>
-                <option value="browser" ${settings.engine === "browser" ? "selected" : ""}>Browser voices</option>
-                ${ttsModels.length ? `<option value="pocket" ${settings.engine === "pocket" ? "selected" : ""}>PocketTTS (audio.cpp)</option>` : ""}
-              </select>
-            </div>
-            <div class="hidden" data-browser-voice-wrap>
-              <label class="label" for="chat-browser-voice">Browser voice</label>
-              <select id="chat-browser-voice" class="select" data-browser-voice></select>
-            </div>
-            <div class="hidden space-y-2" data-pocket-voice-wrap>
-              <div class="flex items-end gap-2">
-                <div class="min-w-0 flex-1">
-                  <label class="label" for="chat-pocket-voice">PocketTTS voice</label>
-                  <select id="chat-pocket-voice" class="select" data-pocket-voice></select>
-                </div>
-                <button class="btn-secondary btn-xs shrink-0" data-refresh-voices title="Load voices from audio.cpp">${icon("refresh", "h-4 w-4")}</button>
-              </div>
-              <p class="text-[11px] text-slate-500">Saved clones appear here too.</p>
-            </div>
-            <div class="hidden" data-spoken-wrap>
-              <label class="label">Last spoken reply</label>
-              <audio class="w-full" controls data-spoken></audio>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <section class="card flex min-h-[26rem] flex-1 flex-col overflow-hidden" style="max-height: 58rem">
-        <div class="flex flex-wrap items-center gap-3 border-b border-white/[0.06] px-4 py-3 sm:px-5">
-          <div class="flex items-center gap-2.5">
-            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-500/10 text-accent-300">${icon("chat", "h-4 w-4")}</span>
-            <div class="min-w-0">
-              <h2 class="text-sm font-semibold text-slate-100">Conversation</h2>
-              <p class="truncate text-[11px] text-slate-500" data-chat-status>${escapeHtml(statusText)}</p>
-            </div>
-          </div>
-          <div class="ml-auto flex items-center gap-2">
-            <span class="chip hidden sm:inline-flex" data-chat-phase></span>
-            <button class="btn-ghost btn-xs" data-new-chat>${icon("plus", "h-4 w-4")} New chat</button>
-          </div>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto" data-messages aria-live="polite"></div>
-
-        <form class="border-t border-white/[0.06] bg-ink-950/40 p-3 sm:p-4" data-composer>
-          <div class="rounded-2xl border border-white/10 bg-ink-950/70 p-2 transition focus-within:border-accent-400/40 focus-within:ring-2 focus-within:ring-accent-500/10">
-            <div class="hidden flex-wrap gap-2 px-1 pb-2" data-attachments></div>
-            <textarea class="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500" rows="1" placeholder="Send a message…" data-input></textarea>
-            <div class="flex items-center gap-1.5 px-1 pt-1.5">
-              <label class="icon-btn cursor-pointer" title="Attach an image">
-                ${icon("attach", "h-5 w-5")}
-                <input type="file" accept="image/*" multiple class="sr-only" data-file />
-              </label>
-              <span class="text-[11px] text-slate-600">Enter to send · Shift+Enter for a new line</span>
-              <div class="ml-auto flex items-center gap-2">
-                <button type="button" class="btn-danger btn-xs" data-stop disabled>${icon("stop", "h-4 w-4")} Stop</button>
-                <button type="submit" class="btn-primary btn-xs" data-send>${icon("send", "h-4 w-4")} Send</button>
-              </div>
-            </div>
-          </div>
-        </form>
-      </section>
-    </div>
-  `;
+  root.innerHTML = await loadChatTemplate();
+  root.querySelectorAll("[data-icon]").forEach((element) => {
+    element.innerHTML = icon(
+      element.dataset.icon,
+      element.dataset.iconClass || "h-4 w-4",
+    );
+  });
 
   const $ = (selector) => root.querySelector(selector);
   const messagesEl = $("[data-messages]");
@@ -188,7 +108,24 @@ export async function renderChat(root, ctx) {
   const browserVoiceWrap = $("[data-browser-voice-wrap]");
   const pocketVoiceSelect = $("[data-pocket-voice]");
   const pocketVoiceWrap = $("[data-pocket-voice-wrap]");
-  const pocketModel = boot.default_speech_model;
+  const pocketModel = speechModel?.id || "";
+
+  $("[data-model]").innerHTML =
+    modelOptions || '<option value="">No models configured</option>';
+  systemInput.value = settings.systemPrompt;
+  thinkingInput.checked = settings.thinking;
+  // The server-side engine is gated on a configured TTS model; its label comes
+  // from that model's alias rather than a hardcoded provider name.
+  if (speechModel) {
+    const option = document.createElement("option");
+    option.value = SERVER_TTS_ENGINE;
+    option.textContent = speechModel.alias;
+    engineSelect.append(option);
+  }
+  const engineValues = [...engineSelect.options].map((option) => option.value);
+  if (engineValues.includes(settings.engine)) {
+    engineSelect.value = settings.engine;
+  }
 
   saveSettings(settings);
 
@@ -352,8 +289,11 @@ export async function renderChat(root, ctx) {
   function updateSpeechVisibility() {
     const engine = settings.engine;
     browserVoiceWrap.classList.toggle("hidden", engine !== "browser");
-    pocketVoiceWrap.classList.toggle("hidden", engine !== "pocket");
-    spokenWrap.classList.toggle("hidden", engine !== "pocket" || !spoken.src);
+    pocketVoiceWrap.classList.toggle("hidden", engine !== SERVER_TTS_ENGINE);
+    spokenWrap.classList.toggle(
+      "hidden",
+      engine !== SERVER_TTS_ENGINE || !spoken.src,
+    );
   }
 
   async function refreshPocketVoices() {
@@ -407,7 +347,9 @@ export async function renderChat(root, ctx) {
     settings.engine = engineSelect.value;
     saveSettings(settings);
     updateSpeechVisibility();
-    if (settings.engine === "pocket" && pocketVoices.length === 0) refreshPocketVoices();
+    if (settings.engine === SERVER_TTS_ENGINE && pocketVoices.length === 0) {
+      refreshPocketVoices();
+    }
   });
   browserVoiceSelect.addEventListener("change", () => {
     settings.browserVoice = browserVoiceSelect.value;
