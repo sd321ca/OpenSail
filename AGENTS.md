@@ -2,9 +2,17 @@
 
 ## Declarative field registry
 
-Applies to: `comfyui_ui/**/*.py`, `configs/fields.json`, `configs/workflow_fields.json`.
+Applies to: `comfyui_ui/**/*.py`, `web/assets/**/*.js`, `configs/fields.json`, `configs/workflow_fields.json`.
 
-The Generate tab's input controls are defined declaratively in `configs/fields.json` and loaded via `comfyui_ui/fields.py`. To add or change an input, edit `configs/fields.json` (add a `fields` entry) rather than hard-coding Gradio components in `comfyui_ui/ui.py`. Node candidates, widget selection and current values are driven by each field's optional `match` spec (or key-based fallback) via `comfyui_ui/workflows.py` (`list_node_candidates`, `get_selected_bindings`, `build_workflow_from_bindings`). Which node inputs each workflow shows is saved per workflow in `configs/workflow_fields.json` as `node_id|input_key` bindings, optionally with a display name; the Generate tab updates it through `comfyui_ui/fields.py` (`get_saved_fields`, `save_workflow_fields`) and `comfyui_ui/workflows.py` (`list_node_candidates`, `get_selected_bindings`, `build_workflow_from_bindings`).
+The Generate page's input controls are defined declaratively in `configs/fields.json` and loaded via `comfyui_ui/fields.py`. To add or change an input, edit `configs/fields.json` (add a `fields` entry) rather than hard-coding a control in `web/assets/pages/generate.js`. Node candidates, widget selection and current values are driven by each field's optional `match` spec (or key-based fallback) via `comfyui_ui/workflows.py` (`list_node_candidates`, `get_selected_bindings`, `build_workflow_from_bindings`). Which node inputs each workflow shows is saved per workflow in `configs/workflow_fields.json` as `node_id|input_key` bindings, optionally with a display name; the Generate page updates it through `comfyui_ui/fields.py` (`get_saved_fields`, `save_workflow_fields`) and the API in `comfyui_ui/server.py`.
+
+## Frontend build
+
+Applies to: `web/**`, `tailwind.config.js`, `package.json`.
+
+The dashboard is a static single-page app in `web/` using Tailwind CSS. UI changes go in `web/assets/pages/*.js`; shared helpers are in `web/assets/ui.js` and API/SSE plumbing in `web/assets/api.js`. After changing classes or markup, rebuild the committed stylesheet with `npm run build:css` (Tailwind scans `web/**/*.{html,js}`). The generated `web/assets/styles.css` is committed; `node_modules/` is not.
+
+The palette is driven by CSS variables in `web/assets/input.css`: `:root` holds the dark theme and `html.light` the light theme. Prefer the `ink-*` / `slate-*` utilities so both themes follow automatically; add explicit `html.light` overrides when introducing a fixed colour or white-alpha surface.
 
 ## Machine-specific config files
 

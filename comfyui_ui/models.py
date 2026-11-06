@@ -12,8 +12,8 @@ top-level ``models`` key listing entries of the shape::
 
 ``mmproj`` is optional; set it for multimodal models so llama-server is
 launched with ``--mmproj``. ``CHAT_MODEL_CHOICES`` is a list of ``(alias, path)``
-pairs ready for a Gradio dropdown (the alias is displayed, the path is the
-value) and ``CHAT_MODEL_MMPROJ`` maps a model path to its projector.
+pairs used by the dashboard (the alias is displayed, the path is the value) and
+``CHAT_MODEL_MMPROJ`` maps a model path to its projector.
 """
 
 import json

@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKFLOWS_DIR = os.path.join(BASE_DIR, "workflows")
 CONFIGS_DIR = os.path.join(BASE_DIR, "configs")
-# Optional .env file at the project root, holding secrets such as the Gradio
+# Optional .env file at the project root, holding secrets such as the dashboard
 # login credentials. Values already present in the environment take priority.
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 load_dotenv(ENV_PATH)
@@ -127,9 +127,10 @@ CONFIG = load_config()
 # Workflow selected by default in the UI.
 DEFAULT_WORKFLOW = CONFIG["default_workflow"]
 COMFY_URL = CONFIG["comfy_url"]
-GRADIO_SERVER_NAME = CONFIG["gradio_server_name"]
-GRADIO_SERVER_PORT = CONFIG["gradio_server_port"]
-GRADIO_SERVER_PUBLIC_ACCESS = CONFIG["gradio_server_public_access"]
+# The HTTP server.
+SERVER_NAME = CONFIG["server_name"]
+SERVER_PORT = CONFIG["server_port"]
+SERVER_PUBLIC_ACCESS = bool(CONFIG.get("server_public_access", False))
 # When True, node inputs with no matching field definition are still offered
 # in the picker with a generic widget based on their value type.
 SHOW_UNMATCHED_NODE_INPUTS = bool(
@@ -200,19 +201,19 @@ AUDIOCPP_IDLE_UNLOAD_MS = int(CONFIG.get("audiocpp_idle_unload_ms", 0))
 
 
 def _load_auth() -> tuple[str, str] | None:
-    """Return the Gradio login credentials from the environment, if set.
+    """Return the dashboard login credentials from the environment, if set.
 
-    Reads ``GRADIO_USERNAME`` and ``GRADIO_PASSWORD`` (from the ``.env`` file
-    or the process environment). When both are set, returns a
-    ``(username, password)`` tuple for Gradio's ``auth`` argument; otherwise
-    returns ``None`` so the app runs without authentication.
+    Reads ``APP_USERNAME`` / ``APP_PASSWORD`` from the ``.env`` file or the
+    process environment. When both are set, returns a ``(username, password)``
+    tuple for HTTP Basic auth; otherwise returns ``None`` so the app runs
+    without authentication.
     """
-    username = os.environ.get("GRADIO_USERNAME")
-    password = os.environ.get("GRADIO_PASSWORD")
+    username = os.environ.get("APP_USERNAME")
+    password = os.environ.get("APP_PASSWORD")
     if username and password:
         return (username, password)
     return None
 
 
-# Login credentials for the Gradio app, or None to disable authentication.
-GRADIO_AUTH = _load_auth()
+# Login credentials for the dashboard, or None to disable authentication.
+APP_AUTH = _load_auth()

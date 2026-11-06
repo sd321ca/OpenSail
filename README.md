@@ -1,9 +1,8 @@
 # OpenSail
 
-OpenSail is an Open source Suite of AI tools for Local models. The purpose is to allow 
-you to easily use your local AI models through a mobile-friendly interface over your LAN or over the internet.  It has support for 
-your existing ComfyUI workflows, llama.cpp, and audio.cpp. It provides a local, 
-Gradio-based workbench for generative media. Run ComfyUI workflows
+OpenSail is an Open source Suite of AI tools for Local models. The purpose is to allow
+you to easily use your local AI models through a mobile-friendly interface over your LAN or over the internet. It has support for
+your existing ComfyUI workflows, llama.cpp, and audio.cpp. It provides a local, responsive dashboard for generative media. Run ComfyUI workflows
 (image, video, music), chat with local GGUF models
 through [llama.cpp](https://github.com/ggml-org/llama.cpp), and generate or
 clone speech with [audio.cpp](https://github.com/0xShug0/audio.cpp) — all from
@@ -14,24 +13,24 @@ is optional, so you can use any one of them on its own or all together.
 
 - Python 3.10 or newer (the code uses `X | None` type hints)
 - Optional: a running ComfyUI instance (default: http://127.0.0.1:8188) for the
-  **Generate** and gallery tabs
+  **Generate** page and gallery pages
 - Optional: a `llama-server` executable from
-  [llama.cpp](https://github.com/ggml-org/llama.cpp) for the **Chat** tab
+  [llama.cpp](https://github.com/ggml-org/llama.cpp) for the **Chat** page
 - Optional: an `audiocpp_server` executable from
-  [audio.cpp](https://github.com/0xShug0/audio.cpp) for the **TextToSpeech** tab
+  [audio.cpp](https://github.com/0xShug0/audio.cpp) for the **Text to Speech** page
 
 All three backends are optional and independent: use the app purely as a
 ComfyUI front end, a llama.cpp chat client, an audio.cpp speech tool, or any
-combination. The UI starts with whatever is available, and each tab reports a
+combination. The UI starts with whatever is available, and each page reports a
 clear error if its backend is missing when you try to use it. The
 `llama-server` and `audiocpp_server` processes are started and stopped by the
 app itself; all three are configured in `configs/constants.json`.
 
-> **Note (ComfyUI flags):** ComfyUI is only ever contacted by the Gradio
-> process, and generated media is proxied through it, so `comfy_url` can stay
+> **Note (ComfyUI flags):** ComfyUI is only ever contacted by the dashboard
+> server, and generated media is proxied through it, so `comfy_url` can stay
 > at `http://127.0.0.1:8188` whenever ComfyUI runs on the same machine as this
 > app — even when you open the UI from another device. The flags below are only
-> needed when ComfyUI runs on a *different* machine than the app:
+> needed when ComfyUI runs on a _different_ machine than the app:
 > start it with `--listen 0.0.0.0 --enable-cors-header` so it accepts
 > connections from the app's host, and point `comfy_url` at the address that
 > host can reach.
@@ -51,6 +50,10 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+The compiled Tailwind stylesheet is committed, so a normal install needs no
+Node.js. If you edit the frontend markup or classes, rebuild it with
+`npm install` followed by `npm run build:css`.
+
 ## Run
 
 ```bash
@@ -58,6 +61,10 @@ python app.py
 ```
 
 Visit http://127.0.0.1:7860
+
+The dashboard opens in dark mode and includes a sun/moon button in the header
+to switch to light mode. The choice is saved in the browser; on a first visit
+the OS color-scheme preference is used.
 
 ## Authentication
 
@@ -74,11 +81,11 @@ cp env.example .env
 Then edit `.env`:
 
 ```dotenv
-GRADIO_USERNAME=admin
-GRADIO_PASSWORD=changeme
+APP_USERNAME=admin
+APP_PASSWORD=changeme
 ```
 
-- When **both** `GRADIO_USERNAME` and `GRADIO_PASSWORD` are set, the app shows
+- When **both** `APP_USERNAME` and `APP_PASSWORD` are set, the app shows
   a login prompt and requires those credentials.
 - When either is missing, authentication is disabled and the app is open to
   anyone who can reach it.
@@ -86,7 +93,11 @@ GRADIO_PASSWORD=changeme
 The `.env` file is git-ignored, so your credentials are never committed.
 Environment variables set outside the file take priority over the `.env` file.
 
-## Tabs
+## Remote access
+
+For remote access, [Tailscale](https://tailscale.com/) is recommended to reach the dashboard privately from your own devices.
+
+## Pages
 
 - **Chat** — talk to a local GGUF model served by
   [llama-server](https://github.com/ggml-org/llama.cpp), launched as a
@@ -108,13 +119,13 @@ Environment variables set outside the file take priority over the `.env` file.
   the **Voice** dropdown picks the installed system voice; for **PocketTTS**,
   pick a **Speech model** (from `audio_models.json`) and a **Voice** (use
   **Refresh** to list the model's voices, including clones saved on the
-  TextToSpeech tab).
+  Text to Speech page).
   Press **Stop** to abort a reply that is still streaming. Press **Unload** to
   terminate the server and free its VRAM before running a
   ComfyUI workflow. The executable, port and load options come from
   `constants.json` (see below).
 
-  > **Note (GPU):** the Chat tab requires a `llama-server` executable built
+  > **Note (GPU):** the Chat page requires a `llama-server` executable built
   > with CUDA. Point `chat_server_path` in `constants.json` at your
   > `llama-server.exe`; the official llama.cpp Windows releases ship one with
   > the CUDA runtime bundled. Offload is controlled by `chat_n_gpu_layers`
@@ -123,7 +134,6 @@ Environment variables set outside the file take priority over the `.env` file.
   > incompatibility of its prebuilt CUDA wheels on 12th/13th-gen Intel CPUs.
 
   <img width="1082" height="3743" alt="chat" src="https://github.com/user-attachments/assets/adbb11b2-f778-46e4-a0c0-bcdfd79aee3a" />
-
 
 - **Generate** — pick a workflow, choose which node inputs to control, and
   generate an image, a song or a video. Press **Choose inputs…** to open a
@@ -160,14 +170,14 @@ Environment variables set outside the file take priority over the `.env` file.
 
 <img width="433" height="1696" alt="generate" src="https://github.com/user-attachments/assets/0626817d-372c-425f-8f47-f504412ff2da" />
  
-- **TextToSpeech** — text-to-speech and voice cloning via
+- **Text to Speech** — text-to-speech and voice cloning via
   [audio.cpp](https://github.com/0xShug0/audio.cpp). Pick a model (aliases from
   `audio_models.json`), type the text, optionally choose a **Voice** preset or
   attach a **reference clip** to clone, then press **Generate**. Reference
   clips may be any format the browser accepts (mp3, flac, ogg, m4a, ...); they
   are converted to WAV automatically. Name the clip under **Save clone as
   voice** and press **Save voice** to add it to the shared voice library, after
-  which it can be selected by name here and in the Chat tab. The
+  which it can be selected by name here and in the Chat page. The
   `audiocpp_server` subprocess starts on the first run and loads models lazily;
   press **Unload** to stop it and free VRAM before running a ComfyUI workflow.
 - **Image Gallery** — browse previously generated images pulled from ComfyUI's
@@ -218,35 +228,35 @@ candidate; they do not hide inputs from the picker.
 
 Which node inputs are shown is saved per workflow in
 `configs/workflow_fields.json` as `node_id|input_key` bindings. The order of
-that list is the order of the controls in the Generate tab. A workflow with no
+that list is the order of the controls in the Generate page. A workflow with no
 entry shows every editable node input; use the **Choose inputs…** popup in the
-Generate tab to choose a subset, reorder it and save it. The file can also be
+Generate page to choose a subset, reorder it and save it. The file can also be
 edited or reordered by hand.
 
 ## Configuration
 
 All configuration lives in the `configs/` folder. There are nine files:
 
-| File                     | Purpose                                                |
-| ------------------------ | ------------------------------------------------------ |
-| `constants.json`         | Server and connection settings                         |
-| `chat_models.json`       | Chat tab model aliases and GGUF paths                  |
-| `audio_models.json`      | TextToSpeech tab audio.cpp TTS models                  |
-| `fields.json`            | Input registry and node-matching hints                 |
-| `workflow_fields.json`   | Per-workflow node selections shown in the Generate tab |
-| `workflow_presets.json`  | Per-workflow saved input presets                       |
-| `samplers.json`          | Sampler names offered in the **Sampler** dropdown      |
-| `schedulers.json`        | Scheduler names offered in the **Scheduler** dropdown  |
-| `workflow_notes.json`    | Per-workflow help notes shown in the Generate tab      |
+| File                    | Purpose                                                 |
+| ----------------------- | ------------------------------------------------------- |
+| `constants.json`        | Server and connection settings                          |
+| `chat_models.json`      | Chat page model aliases and GGUF paths                  |
+| `audio_models.json`     | Text to Speech page audio.cpp TTS models                |
+| `fields.json`           | Input registry and node-matching hints                  |
+| `workflow_fields.json`  | Per-workflow node selections shown in the Generate page |
+| `workflow_presets.json` | Per-workflow saved input presets                        |
+| `samplers.json`         | Sampler names offered in the **Sampler** dropdown       |
+| `schedulers.json`       | Scheduler names offered in the **Scheduler** dropdown   |
+| `workflow_notes.json`   | Per-workflow help notes shown in the Generate page      |
 
 ### `constants.json`
 
 General settings:
 
 - `comfy_url` — base URL of the ComfyUI server
-- `gradio_server_name` — interface to bind (`0.0.0.0` exposes the UI on the LAN)
-- `gradio_server_port` — port to serve on
-- `gradio_server_public_access` - true if you want this to be publicly accessible (on windows i had to add "44.237.78.176 gradio-live.com" to my hosts file due to ipv6 gradio issues)
+- `server_name` — interface to bind (`0.0.0.0` exposes the UI on the LAN)
+- `server_port` — port to serve on
+- `server_public_access` — kept for compatibility; public tunnels are not used by the built-in server
 - `show_unmatched_node_inputs` - when true, node inputs that match no field definition are offered with a generic textbox / number / checkbox (default false)
 - `default_workflow` - workflow filename selected when the UI first loads
 - `chat_n_ctx` — context window size in tokens
@@ -257,11 +267,11 @@ General settings:
   template from the GGUF metadata, which is correct for most instruct models)
 - `chat_system_prompt` — system prompt prepended to every conversation
 - `chat_server_path` — path to the `llama-server` executable used by the Chat
-  tab
+  page
 - `chat_server_port` — port the app-managed `llama-server` listens on
   (127.0.0.1)
 - `audiocpp_server_path` — path to the `audiocpp_server` executable used by the
-  TextToSpeech tab
+  Text to Speech page
 - `audiocpp_port` — port the app-managed `audiocpp_server` listens on
   (127.0.0.1)
 - `audiocpp_backend` — audio.cpp compute backend: `cuda`, `cpu`, `vulkan` or
@@ -280,7 +290,7 @@ General settings:
   `soundfile` fallback)
 - `audiocpp_voice_dir` — folder holding saved voice-cloning references
   (`<name>.wav` plus a `prompt_text` mapping). Voices saved from the
-  TextToSpeech tab land here and are reusable by name in the Chat tab; left
+  Text to Speech page land here and are reusable by name in the Chat page; left
   empty, the project's `voices/` folder is used. (Ignored when
   `audiocpp_config_path` is set — add `voice_dir` to that file yourself.)
 - `audiocpp_config_path` — optional explicit `server.json` to run the server
@@ -290,7 +300,7 @@ General settings:
 
 ### `chat_models.json`
 
-Defines the models offered in the Chat tab's **Model** dropdown. Each entry
+Defines the models offered in the Chat page's **Model** dropdown. Each entry
 pairs a display **alias** with a GGUF **path** (a `.gguf` file or a folder
 containing one). An optional **`mmproj`** points at a multimodal projector so
 the model can accept images (llama-server is launched with `--mmproj`):
@@ -312,7 +322,7 @@ never has to be typed in the UI. The first entry is selected by default.
 
 ### `audio_models.json`
 
-Defines the models offered in the **TextToSpeech** tab's **Model** dropdown.
+Defines the models offered in the **Text to Speech** page's **Model** dropdown.
 These are [audio.cpp](https://github.com/0xShug0/audio.cpp) models (GGUF
 conversions or original checkpoints). Each entry pairs a display **alias** with
 an audio.cpp **`id`** and **`family`**, plus a model location given as either a
@@ -352,7 +362,7 @@ The first entry is selected by default.
 
 ### `fields.json`
 
-The Generate tab's input controls are **not hard-coded** in the UI. They are
+The Generate page's input controls are **not hard-coded** in the UI. They are
 described declaratively in `fields.json`, and the UI is built from that
 registry. Adding a new input is a config change, not a code change.
 
@@ -385,14 +395,14 @@ with a literal value that one of the widgets can edit is selectable, while
 links are skipped. Node type, value type and input keys decide which field
 definition supplies the widget and options. Inputs that are supplied by the
 dedicated upload controls (`LoadImage.image`, `LoadAudio.audio` and
-`LoadVideo.file`) are not listed, because the Generate tab sets them from the
+`LoadVideo.file`) are not listed, because the Generate page sets them from the
 uploaded file. Inputs that match no field are hidden unless
 `show_unmatched_node_inputs` is enabled in `constants.json`; when enabled they
 get a generic textbox / number / checkbox based on their value type.
 
 ### `workflow_fields.json`
 
-This file stores the per-workflow node selections shown in the Generate tab.
+This file stores the per-workflow node selections shown in the Generate page.
 `workflow_fields` maps a workflow filename to the list of node bindings shown
 there. A binding is `node_id|input_key`, optionally followed by a third
 `|display_name` segment used as the control label:
@@ -411,18 +421,18 @@ there. A binding is `node_id|input_key`, optionally followed by a third
 
 In the **Choose inputs…** popup, tick **Show** for each control, optionally
 type a **Display name**, and set its position with **Order**. Named controls
-use that label in the Generate tab. The popup's **Workflow notes** section
-edits the tips shown in the Generate tab's notes panel (stored in
+use that label in the Generate page. The popup's **Workflow notes** section
+edits the tips shown in the Generate page's notes panel (stored in
 `configs/workflow_notes.json`); press **Save notes** there to apply them.
 
-**Order** sets where each control appears in the Generate tab: lower numbers
+**Order** sets where each control appears in the Generate page: lower numbers
 first. Rows left blank keep their table position and are placed after the
 explicitly ordered ones, and equal numbers fall back to table order. The popup
 lists selected inputs first, numbered `1..n`; after **Save input selection**
 the table is renumbered to match what was stored.
 
 - The list order is the control order: the first binding becomes the top
-  control in the Generate tab.
+  control in the Generate page.
 - A workflow with no entry shows every editable node input it contains.
 - An empty list hides every node control for that workflow.
 - Stale bindings are ignored, so renaming or removing a node is safe.
@@ -435,7 +445,7 @@ the table is renumbered to match what was stored.
 ### `workflow_presets.json`
 
 Stores named sets of input values for each workflow, so one workflow can have
-several ready-made configurations. In the Generate tab, open **Input presets**,
+several ready-made configurations. In the Generate page, open **Input presets**,
 type a name and press **Save preset** to store the current control values.
 Select a preset and press **Load** to apply it, or **Delete** to remove it.
 
@@ -488,7 +498,7 @@ created by copying `configs/schedulers.example.json`.
 
 ### `workflow_notes.json`
 
-Lets you show workflow-specific tips and information in the Generate tab,
+Lets you show workflow-specific tips and information in the Generate page,
 without editing the workflow itself. It maps a workflow filename to a Markdown
 string; the notes are rendered in a **Workflow notes** panel that appears
 under the workflow dropdown whenever a workflow with notes is selected.

@@ -1,0 +1,13 @@
+{
+  "name": "opensail-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tailwind CSS build for the OpenSail dashboard.",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i web/assets/input.css -o web/assets/styles.css --minify",
+    "watch:css": "tailwindcss -c tailwind.config.js -i web/assets/input.css -o web/assets/styles.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}

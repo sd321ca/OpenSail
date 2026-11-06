@@ -1,8 +1,8 @@
-"""Chat tab: stream replies from a local GGUF model.
+"""Chat: stream replies from a local GGUF model.
 
 The model is a ``.gguf`` file (or a folder containing one) anywhere on disk.
 Its path is configured in ``configs/constants.json`` and can also be changed
-from the Chat tab. The model is loaded **lazily** on the first message and can
+from the Chat view. The model is loaded **lazily** on the first message and can
 be released with the **Unload** button, so the same app can chat and then run
 ComfyUI image/music/video workflows without the LLM holding onto memory.
 
@@ -24,7 +24,6 @@ import tempfile
 import threading
 import time
 
-import gradio as gr
 import requests
 
 from .config import (
@@ -34,122 +33,12 @@ from .config import (
     CHAT_N_THREADS,
     CHAT_SERVER_PATH,
     CHAT_SERVER_PORT,
-    CHAT_SYSTEM_PROMPT,
 )
-from .audio import AudioModel
-from .audio_models import AUDIO_MODELS
+from .errors import AppError
 from .models import (
-    CHAT_MODEL_CHOICES,
     CHAT_MODEL_MMPROJ,
     DEFAULT_CHAT_MODEL_PATH,
 )
-
-# Browser-side helper for the "Speak replies with" choice. The Chat tab can
-# speak replies either through the browser's Web Speech API ("browser") or
-# through a local audio.cpp PocketTTS server ("pocket"). These flags tell the
-# client-side helpers which engine is active; the "pocket" path is driven
-# server-side (see ``_speak_reply``), and "browser" reuses the debounced
-# ``_VOICE_SPEAK_JS`` below.
-_SPEAK_ENGINE_JS = """
-(x) => {
-    window.__ttsEnabled = (x === "browser");
-    window.__pocketSpeak = (x === "pocket");
-    if (!window.__ttsEnabled && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-    }
-    return x;
-}
-"""
-
-# Voice picker: a native <select> (Gradio sanitizes away inline handlers, so
-# the change listener is attached from _VOICE_SETUP_JS). The list of voices is
-# only known to the browser, so it is filled client-side from
-# speechSynthesis.getVoices() and refreshed on the onvoiceschanged event.
-_VOICE_SELECT_HTML = """
-<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">
-  <label for="tts-voice" style="font-weight:600;white-space:nowrap;">Voice</label>
-  <select id="tts-voice"
-          style="flex:1;padding:6px;border-radius:8px;
-                 border:1px solid var(--border-color-primary,#8884);
-                 background-color:var(--background-fill-primary,#ffffff);
-                 color:var(--body-text-color,#1f2937);">
-    <option value="" style="background-color:var(--background-fill-primary,#ffffff);color:var(--body-text-color,#1f2937);">System default</option>
-  </select>
-</div>
-"""
-
-_VOICE_SETUP_JS = """
-() => {
-    const sel = document.getElementById("tts-voice");
-    if (!sel) return;
-    const populate = () => {
-        const voices = window.speechSynthesis
-            ? window.speechSynthesis.getVoices() : [];
-        if (!voices.length) return;
-        const current = sel.value || window.__ttsVoice || "";
-        const optStyle =
-            "background-color:var(--background-fill-primary,#ffffff);" +
-            "color:var(--body-text-color,#1f2937);";
-        sel.innerHTML = "";
-        const def = document.createElement("option");
-        def.value = "";
-        def.textContent = "System default";
-        def.style.cssText = optStyle;
-        sel.appendChild(def);
-        voices.forEach((v) => {
-            const opt = document.createElement("option");
-            opt.value = v.name;
-            opt.textContent = v.name + (v.lang ? " (" + v.lang + ")" : "");
-            opt.style.cssText = optStyle;
-            sel.appendChild(opt);
-        });
-        if (current && voices.some((v) => v.name === current)) {
-            sel.value = current;
-        }
-    };
-    sel.addEventListener("change", () => { window.__ttsVoice = sel.value; });
-    populate();
-    if (window.speechSynthesis) {
-        window.speechSynthesis.onvoiceschanged = populate;
-    }
-}
-"""
-
-_VOICE_SPEAK_JS = """
-(value) => {
-    clearTimeout(window.__ttsTimer);
-    window.__ttsTimer = setTimeout(() => {
-        if (!window.__ttsEnabled) return;
-        const msgs = value || [];
-        let text = "";
-        for (let i = msgs.length - 1; i >= 0; i--) {
-            const m = msgs[i];
-            if (m && m.role === "assistant") {
-                text = typeof m.content === "string"
-                    ? m.content
-                    : (Array.isArray(m.content)
-                        ? m.content.map((c) => (c && c.text) || "").join(" ")
-                        : "");
-                break;
-            }
-        }
-        text = (text || "").trim();
-        if (!text || text === window.__ttsLast) return;
-        window.__ttsLast = text;
-        const synth = window.speechSynthesis;
-        if (!synth) return;
-        const utter = new SpeechSynthesisUtterance(text);
-        const sel = document.getElementById("tts-voice");
-        const name = (sel && sel.value) || window.__ttsVoice || "";
-        if (name) {
-            const voice = synth.getVoices().find((v) => v.name === name);
-            if (voice) utter.voice = voice;
-        }
-        synth.cancel();
-        synth.speak(utter);
-    }, 1200);
-}
-"""
 
 
 def _resolve_model_path(path: str) -> str:
@@ -166,10 +55,10 @@ def _resolve_model_path(path: str) -> str:
             if name.lower().endswith(".gguf")
         )
         if not ggufs:
-            raise gr.Error(f"No .gguf file found in folder: {path}")
+            raise AppError(f"No .gguf file found in folder: {path}")
         path = os.path.join(path, ggufs[0])
     if not os.path.isfile(path):
-        raise gr.Error(f"Model file not found: {path}")
+        raise AppError(f"Model file not found: {path}")
     return path
 
 
@@ -237,11 +126,11 @@ def _image_content_part(path: str) -> dict | None:
 
 
 def _history_to_message(item: dict) -> dict | None:
-    """Convert one Gradio chat-history item to an OpenAI chat message.
+    """Convert a stored chat-history item to an OpenAI chat message.
 
-    Plain string content is passed through. The multimodal list form Gradio
-    produces (text strings plus ``{"path": ...}`` image entries) is converted
-    to OpenAI content parts. Returns ``None`` for items with no usable content.
+    Plain string content is passed through. A multimodal list of text strings
+    and ``{"path": ...}`` image entries is converted to OpenAI content parts.
+    Returns ``None`` for items with no usable content.
     """
     if not isinstance(item, dict):
         return None
@@ -272,7 +161,7 @@ def _history_to_message(item: dict) -> dict | None:
 
 
 def _user_to_message(message) -> dict:
-    """Convert the new user message (str or Gradio multimodal dict)."""
+    """Convert a new user message (text or a ``{text, files}`` dict)."""
     if isinstance(message, str):
         return {"role": "user", "content": message}
     text = (message or {}).get("text", "") or ""
@@ -320,10 +209,10 @@ class ChatModel:
         return self._server is not None and self._server.poll() is None
 
     def status(self) -> str:
-        """A short human-readable status line for the Chat tab."""
+        """A short human-readable status line for the Chat view."""
         if not self.loaded:
             return "No model loaded."
-        return f"Loaded (llama-server): `{self._loaded_path}`"
+        return f"Loaded (llama-server): {self._loaded_path}"
 
     def load(self, path: str | None = None) -> str:
         """Start (or restart) llama-server and return a status message."""
@@ -342,7 +231,7 @@ class ChatModel:
         """Spawn llama-server for ``path`` and wait for it to become ready."""
         server_path = os.path.expanduser((CHAT_SERVER_PATH or "").strip())
         if not server_path or not os.path.isfile(server_path):
-            raise gr.Error(
+            raise AppError(
                 "llama-server not found. Set `chat_server_path` in "
                 "configs/constants.json to your llama-server executable."
             )
@@ -366,7 +255,7 @@ class ChatModel:
         if mmproj:
             mmproj = os.path.expanduser(mmproj)
             if not os.path.isfile(mmproj):
-                raise gr.Error(f"mmproj file not found: {mmproj}")
+                raise AppError(f"mmproj file not found: {mmproj}")
             cmd += ["--mmproj", mmproj]
 
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -389,7 +278,7 @@ class ChatModel:
             )
         except OSError as exc:
             self._close_log()
-            raise gr.Error(f"Failed to start llama-server: {exc}") from exc
+            raise AppError(f"Failed to start llama-server: {exc}") from exc
 
         self._base_url = f"http://127.0.0.1:{CHAT_SERVER_PORT}"
         self._wait_for_server()
@@ -433,7 +322,7 @@ class ChatModel:
                 message = f"llama-server exited during startup (code {code})."
                 if tail:
                     message += f"\n\n{tail}"
-                raise gr.Error(message)
+                raise AppError(message)
             try:
                 resp = requests.get(health, timeout=2)
                 if resp.status_code == 200:
@@ -446,7 +335,7 @@ class ChatModel:
         message = "Timed out waiting for llama-server to become ready."
         if tail:
             message += f"\n\n{tail}"
-        raise gr.Error(message)
+        raise AppError(message)
 
     def _close_locked(self) -> None:
         """Terminate the server and reclaim its memory. Lock must be held."""
@@ -471,7 +360,7 @@ class ChatModel:
                 return self.status()
             path = self._loaded_path
             self._close_locked()
-        return f"Unloaded: `{path}`"
+        return f"Unloaded: {path}"
 
     def cancel(self) -> None:
         """Request that the in-flight reply stop streaming.
@@ -485,8 +374,8 @@ class ChatModel:
         """Yield the assistant reply for ``messages``, one chunk at a time.
 
         ``messages`` is an OpenAI-style list of ``{"role", "content"}`` dicts.
-        Yields the **cumulative** reply text (not deltas), which is what
-        ``gr.ChatInterface`` expects from a streaming function.
+        Yields the **cumulative** reply text (not deltas), which is what the
+        dashboard's streaming endpoint forwards to the browser.
 
         ``enable_thinking`` toggles the reasoning block for models whose chat
         template supports it (e.g. Qwen3.5). ``None`` leaves the model default.
@@ -526,7 +415,7 @@ class ChatModel:
                 # mangle non-ASCII characters (e.g. curly quotes). Force UTF-8.
                 resp.encoding = "utf-8"
                 if resp.status_code != 200:
-                    state["error"] = gr.Error(
+                    state["error"] = AppError(
                         f"llama-server error {resp.status_code}: {resp.text}"
                     )
                     return
@@ -584,280 +473,6 @@ class ChatModel:
 
         error = state.get("error")
         if error is not None and not self._cancel_event.is_set():
-            if isinstance(error, gr.Error):
+            if isinstance(error, AppError):
                 raise error
-            raise gr.Error(f"Lost connection to llama-server: {error}")
-
-
-def build_chat_tab(
-    model: ChatModel | None = None,
-    audio_model: AudioModel | None = None,
-) -> ChatModel:
-    """Render the Chat tab inside the current Blocks context.
-
-    Shows a model dropdown (aliases from ``configs/chat_models.json``) with
-    **Load** / **Unload** buttons above a ``gr.ChatInterface``. Assistant
-    replies can be spoken either with the browser's built-in voices or, when
-    ``audio_model`` is given, synthesized locally with audio.cpp PocketTTS.
-    Returns the :class:`ChatModel` manager so callers can unload it elsewhere.
-    """
-    model = model or ChatModel()
-
-    def _speak_with_audio(text: str, voice: str | None):
-        """Synthesize ``text`` with PocketTTS; return a WAV path or None."""
-        if audio_model is None or not default_speech_model:
-            return None
-        path = None
-        for _status, audio in audio_model.generate(
-            default_speech_model, text, voice=voice
-        ):
-            path = audio
-        return path
-
-    def respond(
-        message, history, system_prompt, enable_thinking, engine, voice
-    ):
-        """Stream a reply; speak it once complete when PocketTTS is chosen.
-
-        Yields ``(reply_text, audio, stop)``: ``audio`` is left unchanged while
-        the reply streams and is set to the generated WAV at the end, and
-        ``stop`` shows the Stop button only while the reply is being generated.
-        Because synthesis only happens after the model has finished, the reply
-        is never spoken in overlapping fragments (which previously caused the
-        player to restart repeatedly). ``message`` is a string or Gradio's
-        ``{"text", "files"}`` dict; attached images become base64 content parts.
-        """
-        messages = []
-        if system_prompt and system_prompt.strip():
-            messages.append(
-                {"role": "system", "content": system_prompt.strip()}
-            )
-        for item in history or []:
-            converted = _history_to_message(item)
-            if converted is not None:
-                messages.append(converted)
-        messages.append(_user_to_message(message))
-
-        text = ""
-        # Show the Stop button for the whole reply: up as soon as the request
-        # starts, down once it finishes (or fails).
-        yield "", gr.update(), gr.update(visible=True)
-        try:
-            for text in model.stream(
-                messages, enable_thinking=enable_thinking
-            ):
-                yield text, gr.update(), gr.update(visible=True)
-        except gr.Error:
-            yield text, gr.update(), gr.update(visible=False)
-            raise
-        except Exception as exc:  # noqa: BLE001
-            yield text, gr.update(), gr.update(visible=False)
-            raise gr.Error(f"Chat failed: {exc}")
-
-        # The reply is complete: synthesize it once, if requested.
-        if engine != "pocket" or not text.strip():
-            yield text, gr.update(), gr.update(visible=False)
-            return
-        yield text, _speak_with_audio(text, voice), gr.update(visible=False)
-
-    def do_load(path_value: str) -> str:
-        try:
-            return model.load(path_value)
-        except gr.Error as exc:
-            return f"Error: {exc}"
-        except Exception as exc:  # noqa: BLE001
-            return f"Error: {exc}"
-
-    def do_unload() -> str:
-        try:
-            return model.unload()
-        except Exception as exc:  # noqa: BLE001
-            return f"Error: {exc}"
-
-    # Text-to-speech models available for the "PocketTTS" speech engine, and
-    # the default model for it (the pocket_tts family if configured). Voices
-    # come from the server once the model is loaded.
-    tts_models = [
-        (entry["alias"], entry["id"])
-        for entry in AUDIO_MODELS
-        if entry.get("task", "tts") == "tts"
-    ]
-    default_speech_model = next(
-        (entry["id"] for entry in AUDIO_MODELS if entry.get("family") == "pocket_tts"),
-        tts_models[0][1] if tts_models else None,
-    )
-
-    def _engine_change(engine):
-        """Show/label the controls for the selected speech engine.
-
-        Selecting PocketTTS also fills the voice dropdown from the server (its
-        model loads lazily, so this only starts the server process).
-        """
-        browser = engine == "browser"
-        pocket = engine == "pocket"
-        voice_update = gr.update(visible=pocket)
-        if pocket and audio_model is not None and default_speech_model:
-            try:
-                voices = audio_model.list_voices(default_speech_model)
-            except Exception:  # noqa: BLE001
-                voices = []
-            if voices:
-                voice_update = gr.update(
-                    visible=True, choices=voices, value=voices[0]
-                )
-        return (
-            voice_update,                     # pocket voice
-            gr.update(visible=browser),       # browser voice picker
-            gr.update(visible=pocket),        # spoken-reply audio player
-            gr.update(visible=pocket),        # refresh voices button
-        )
-
-    def do_refresh_speech_voices():
-        """Re-list the PocketTTS voices, including newly saved clones."""
-        if audio_model is None or not default_speech_model:
-            return gr.update(choices=[], value=None)
-        try:
-            voices = audio_model.list_voices(default_speech_model)
-        except Exception:  # noqa: BLE001
-            return gr.update()
-        if not voices:
-            return gr.update(choices=[], value=None)
-        return gr.update(choices=voices, value=voices[0])
-
-    # Choices are (alias, path) pairs from configs/chat_models.json, so the alias is
-    # shown in the dropdown while the value passed to the callback is the path.
-    choices = list(CHAT_MODEL_CHOICES)
-    values = [path for _alias, path in choices]
-    default_path = model.path or DEFAULT_CHAT_MODEL_PATH
-    if default_path not in values:
-        default_path = values[0] if values else None
-
-    with gr.Row():
-        model_dd = gr.Dropdown(
-            choices=choices,
-            value=default_path,
-            label="Model",
-            scale=4,
-        )
-        load_btn = gr.Button("Load", variant="primary", scale=1)
-        unload_btn = gr.Button("Unload", variant="stop", scale=1)
-
-    status = gr.Markdown(model.status())
-
-    load_btn.click(fn=do_load, inputs=[model_dd], outputs=[status])
-    unload_btn.click(fn=do_unload, inputs=None, outputs=[status])
-
-    # Speech settings. The browser engine uses the Web Speech API (voice list
-    # filled client-side by _VOICE_SETUP_JS); the PocketTTS engine uses the
-    # shared audio.cpp server. "speak_engine" and "speech_voice" are passed to
-    # the chat function as additional inputs; "reply_audio" receives the WAV.
-    engine_choices = [
-        ("Off", "off"),
-        ("Browser (system voices)", "browser"),
-    ]
-    if audio_model is not None and tts_models:
-        engine_choices.append(("PocketTTS (audio.cpp)", "pocket"))
-
-    speak_engine = gr.Dropdown(
-        choices=engine_choices,
-        value="off",
-        label="Speak replies with",
-    )
-    with gr.Row():
-        speech_voice = gr.Dropdown(
-            choices=[],
-            value=None,
-            label="PocketTTS voice",
-            allow_custom_value=True,
-            visible=False,
-            scale=4,
-        )
-        refresh_voices_btn = gr.Button("Refresh", scale=1, visible=False)
-
-    voice_select = gr.HTML(
-        _VOICE_SELECT_HTML, elem_classes="tts-voice", visible=False
-    )
-    voice_select.load(fn=None, js=_VOICE_SETUP_JS)
-
-    reply_audio = gr.Audio(
-        label="Spoken reply",
-        type="filepath",
-        autoplay=True,
-        visible=False,
-    )
-
-    speak_engine.change(
-        fn=_engine_change,
-        inputs=[speak_engine],
-        outputs=[speech_voice, voice_select, reply_audio, refresh_voices_btn],
-        js=_SPEAK_ENGINE_JS,
-    )
-    refresh_voices_btn.click(
-        fn=do_refresh_speech_voices, inputs=None, outputs=[speech_voice]
-    )
-
-    system_box = gr.Textbox(
-        label="System prompt",
-        value=CHAT_SYSTEM_PROMPT,
-        lines=3,
-        info="Instructions prepended to the conversation. Leave empty for none.",
-    )
-    thinking_cb = gr.Checkbox(
-        label="Enable thinking",
-        value=False,
-        info=(
-            "Let reasoning models (e.g. Qwen3.5) write their thinking block "
-            "before answering. Uncheck for direct answers."
-        ),
-    )
-
-    # Declared unrendered so it can be a ChatInterface additional output, then
-    # rendered below the chat box. It stays hidden until a reply streams.
-    stop_btn = gr.Button("Stop", variant="stop", visible=False, render=False)
-
-    chat = gr.ChatInterface(
-        fn=respond,
-        multimodal=True,
-        textbox=gr.MultimodalTextbox(
-            file_types=["image"],
-            file_count="multiple",
-            placeholder="Send a message or attach an image...",
-        ),
-        additional_inputs=[
-            system_box,
-            thinking_cb,
-            speak_engine,
-            speech_voice,
-        ],
-        additional_inputs_accordion="Chat settings",
-        additional_outputs=[reply_audio, stop_btn],
-        title="Chat",
-        description=(
-            "Replies stream from a local GGUF model served by llama-server "
-            "(GPU). Attach an image to chat with a multimodal model that has "
-            "an `mmproj` configured. Set **Speak replies with** to read "
-            "replies aloud using the browser or a local audio.cpp PocketTTS "
-            "voice. The model loads on the first message; press **Unload** to "
-            "free VRAM before running a ComfyUI workflow."
-        ),
-        flagging_mode="never",
-        fill_width=True,
-    )
-
-    # Below the chat box: rendered after the ChatInterface so it sits under it,
-    # and only ever shown while a reply is streaming (see ``respond``).
-    with gr.Row():
-        stop_btn.render()
-    # Abort the in-flight reply. concurrency_limit=None lets it run while the
-    # streaming submit event is still active (otherwise it would queue behind).
-    stop_btn.click(
-        fn=model.cancel, inputs=None, outputs=None, concurrency_limit=None
-    )
-
-    # Browser engine speaks the settled reply client-side (see _VOICE_SPEAK_JS);
-    # the PocketTTS engine is spoken inside ``respond`` (see additional_outputs).
-    chat.chatbot.change(
-        fn=None, inputs=[chat.chatbot], js=_VOICE_SPEAK_JS
-    )
-
-    return model
+            raise AppError(f"Lost connection to llama-server: {error}")

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#070a12" />
+    <title>OpenSail</title>
+    <script>
+      // Apply the saved theme before the first paint to avoid a flash.
+      (() => {
+        try {
+          const saved = localStorage.getItem("opensail.theme");
+          const light =
+            saved === "light" ||
+            (!saved &&
+              window.matchMedia("(prefers-color-scheme: light)").matches);
+          document.documentElement.classList.toggle("light", light);
+        } catch (_error) {
+          // localStorage can be unavailable; fall back to the dark theme.
+        }
+      })();
+    </script>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body class="h-full">
+    <div
+      id="mobile-overlay"
+      class="fixed inset-0 z-30 hidden bg-black/60 backdrop-blur-sm lg:hidden"
+    ></div>
+
+    <aside
+      id="sidebar"
+      class="fixed inset-y-0 left-0 z-40 flex w-72 -translate-x-full flex-col border-r border-white/[0.06] bg-ink-950/95 backdrop-blur-xl transition-transform duration-200 ease-out lg:translate-x-0"
+    >
+      <div
+        class="flex h-16 items-center gap-3 border-b border-white/[0.06] px-5"
+      >
+        <div
+          class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent-400 to-sky-400 text-white shadow-lg shadow-accent-500/30"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 17.5 12 4l8 13.5" />
+            <path d="M7.5 17.5h9" />
+            <path d="M12 12v9" />
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <p class="truncate text-sm font-bold tracking-tight text-slate-100">
+            OpenSail
+          </p>
+          <p class="truncate text-[11px] text-slate-500">Local AI dashboard</p>
+        </div>
+        <button
+          id="sidebar-close"
+          class="icon-btn ml-auto lg:hidden"
+          aria-label="Close navigation"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <nav
+        id="nav-list"
+        class="flex-1 space-y-1 overflow-y-auto px-3 py-4"
+        aria-label="Main navigation"
+      ></nav>
+
+      <div class="border-t border-white/[0.06] p-3">
+        <div class="rounded-xl border border-white/[0.05] bg-white/[0.025] p-3">
+          <div
+            class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500"
+          >
+            <span
+              id="comfy-dot"
+              class="h-1.5 w-1.5 rounded-full bg-amber-400"
+            ></span>
+            ComfyUI
+          </div>
+          <p id="comfy-url" class="mt-1.5 truncate text-xs text-slate-400">
+            Checking connection…
+          </p>
+          <div class="mt-2 flex items-center gap-2">
+            <button id="reload-app" class="btn-ghost btn-xs flex-1">
+              Reload app
+            </button>
+            <a
+              id="comfy-link"
+              href="#"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-secondary btn-xs"
+              >Open</a
+            >
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="lg:pl-72">
+      <header
+        class="sticky top-0 z-20 border-b border-white/[0.06] bg-ink-950/75 backdrop-blur-xl"
+      >
+        <div
+          class="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6 lg:px-8"
+        >
+          <button
+            id="menu-button"
+            class="icon-btn -ml-1 lg:hidden"
+            aria-label="Open navigation"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              class="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+          <div class="min-w-0">
+            <h1
+              id="page-title"
+              class="truncate text-base font-semibold tracking-tight text-slate-100 sm:text-lg"
+            >
+              Generate
+            </h1>
+            <p
+              id="page-subtitle"
+              class="hidden truncate text-xs text-slate-500 sm:block"
+            >
+              Customize and run a ComfyUI workflow.
+            </p>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <span id="connection-chip" class="chip hidden sm:inline-flex">
+              <span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
+              <span>Connecting</span>
+            </span>
+            <button
+              id="theme-toggle"
+              class="icon-btn"
+              type="button"
+              aria-label="Toggle light and dark theme"
+              title="Toggle light and dark theme"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                class="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"
+                />
+              </svg>
+            </button>
+            <button id="refresh-page" class="btn-secondary btn-xs">
+              <svg
+                viewBox="0 0 24 24"
+                class="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+                <path d="M20 4v7h-7" />
+              </svg>
+              <span class="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main
+        id="main"
+        class="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8"
+      ></main>
+    </div>
+
+    <div id="modal-root"></div>
+    <div
+      id="toast-root"
+      class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2 sm:bottom-6 sm:right-6"
+    ></div>
+
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

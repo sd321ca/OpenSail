@@ -1,28 +1,37 @@
-__pycache__
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+todo.md
 
 # Virtual environments
 .venv/
 venv/
 env/
 
-# Python
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-todo.md
-
 # Secrets
 .env
 
-# Gradio runtime files (auto-generated, machine-specific)
-.gradio/
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Frontend build dependencies and logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# The compiled Tailwind stylesheet is committed on purpose; do not ignore
+# web/assets/styles.css.
 
 # Saved voice-cloning references (auto-generated, machine-specific)
 voices/
 
+# Workflows and machine-specific config
 workflows/
 configs/audio_models.json
-
 configs/chat_models.json
 configs/constants.json
 configs/fields.json
@@ -31,3 +40,6 @@ configs/schedulers.json
 configs/workflow_fields.json
 configs/workflow_notes.json
 configs/workflow_presets.json
+
+# Atomic-write leftovers from the config editors
+configs/*.tmp

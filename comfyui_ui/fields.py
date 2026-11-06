@@ -26,12 +26,10 @@ Each field entry has the shape::
         }
     }
 
-``options`` are passed straight to the Gradio component, except for two
+``options`` are passed to the dashboard's matching control, except for two
 registry-only keys: ``choices_source`` (dropdown choices, see
-``resolve_choices``) and ``fullscreen`` (textbox only). ``"fullscreen": true``
-opens the textbox as a full-screen editor on phones while it has focus; on
-desktop it keeps the normal inline textarea. See ``assets.FULLSCREEN_TEXT_JS``
-(in ``fullscreen.js``).
+``resolve_choices``) and ``fullscreen`` (textbox only, kept for backwards
+compatibility with older field registries).
 """
 
 import json

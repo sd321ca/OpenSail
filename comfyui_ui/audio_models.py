@@ -22,7 +22,7 @@ config unchanged.
 
 ``folder`` is resolved against ``audiocpp_models_dir`` (configs/constants.json);
 ``path`` is used verbatim (with ``~`` expanded). ``AUDIO_MODEL_CHOICES`` is a
-list of ``(alias, id)`` pairs ready for a Gradio dropdown.
+list of ``(alias, id)`` pairs used by the dashboard.
 """
 
 import json

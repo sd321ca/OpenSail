@@ -1,0 +1,543 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --ink-950: 7 10 18;
+    --ink-900: 11 16 28;
+    --ink-850: 16 23 38;
+    --ink-800: 21 29 46;
+    --ink-700: 30 41 59;
+    --slate-50: 248 250 252;
+    --slate-100: 241 245 249;
+    --slate-200: 226 232 240;
+    --slate-300: 203 213 225;
+    --slate-400: 148 163 184;
+    --slate-500: 100 116 139;
+    --slate-600: 71 85 105;
+    --slate-700: 51 65 85;
+    --slate-800: 30 41 59;
+    --slate-900: 15 23 42;
+    --slate-950: 2 6 23;
+  }
+
+  html.light {
+    color-scheme: light;
+    --ink-950: 248 250 252;
+    --ink-900: 255 255 255;
+    --ink-850: 255 255 255;
+    --ink-800: 241 245 249;
+    --ink-700: 226 232 240;
+    --slate-50: 15 23 42;
+    --slate-100: 15 23 42;
+    --slate-200: 30 41 59;
+    --slate-300: 51 65 85;
+    --slate-400: 71 85 105;
+    --slate-500: 100 116 139;
+    --slate-600: 100 116 139;
+    --slate-700: 203 213 225;
+    --slate-800: 226 232 240;
+    --slate-900: 241 245 249;
+    --slate-950: 248 250 252;
+  }
+
+  html {
+    @apply bg-ink-950;
+  }
+
+  body {
+    @apply min-h-screen bg-ink-950 font-sans text-slate-200 antialiased;
+    background-image:
+      radial-gradient(70rem 40rem at 8% -10%, rgba(79, 70, 229, 0.16), transparent 60%),
+      radial-gradient(60rem 35rem at 110% 10%, rgba(14, 165, 233, 0.08), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    @apply bg-accent-500/40 text-white;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-600/50;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-white/[0.06] bg-ink-900/80 shadow-2xl shadow-black/20 backdrop-blur;
+  }
+
+  .card-soft {
+    @apply rounded-xl border border-white/[0.05] bg-white/[0.025];
+  }
+
+  .card-header {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3 sm:px-5;
+  }
+
+  .card-title {
+    @apply text-sm font-semibold tracking-tight text-slate-100;
+  }
+
+  .card-subtitle {
+    @apply text-xs text-slate-400;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  .input,
+  .select,
+  .textarea {
+    @apply w-full rounded-xl border border-white/10 bg-ink-950/70 px-3 py-2 text-sm text-slate-100 shadow-inner shadow-black/10 outline-none transition placeholder:text-slate-500 focus:border-accent-400/60 focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .select {
+    @apply cursor-pointer appearance-none bg-[length:16px_16px] bg-[right_0.75rem_center] bg-no-repeat pr-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  }
+
+  .textarea {
+    @apply resize-y leading-relaxed;
+  }
+
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent-500 text-white shadow-lg shadow-accent-600/25 hover:bg-accent-400 active:bg-accent-600;
+  }
+
+  .btn-secondary {
+    @apply btn border border-white/10 bg-white/[0.06] text-slate-100 hover:border-white/20 hover:bg-white/[0.1];
+  }
+
+  .btn-ghost {
+    @apply btn text-slate-300 hover:bg-white/[0.06] hover:text-slate-100;
+  }
+
+  .btn-danger {
+    @apply btn border border-rose-500/25 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20;
+  }
+
+  .btn-xs {
+    @apply rounded-lg px-2.5 py-1.5 text-xs;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400/60;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300;
+  }
+
+  .chip-success {
+    @apply border-emerald-400/20 bg-emerald-400/10 text-emerald-300;
+  }
+
+  .chip-warn {
+    @apply border-amber-400/20 bg-amber-400/10 text-amber-300;
+  }
+
+  .chip-danger {
+    @apply border-rose-400/20 bg-rose-400/10 text-rose-300;
+  }
+
+  .nav-link {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition hover:bg-white/[0.05] hover:text-slate-100;
+  }
+
+  .nav-link-active {
+    @apply bg-accent-500/10 text-slate-50 shadow-inner shadow-accent-500/10 ring-1 ring-inset ring-accent-400/20;
+  }
+
+  .nav-icon {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.03] text-slate-400 transition group-hover:text-slate-100;
+  }
+
+  .nav-link-active .nav-icon {
+    @apply bg-accent-500/15 text-accent-300;
+  }
+
+  .field-row {
+    @apply space-y-1.5;
+  }
+
+  .switch {
+    @apply relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-white/10 bg-slate-700/70 transition;
+  }
+
+  .switch input {
+    @apply sr-only;
+  }
+
+  .switch > span {
+    @apply pointer-events-none absolute inset-0 rounded-full bg-slate-700/70 transition;
+  }
+
+  .switch > span::after {
+    content: "";
+    @apply absolute left-1 top-1 h-4 w-4 rounded-full bg-slate-200 shadow transition;
+  }
+
+  .switch input:checked + span {
+    @apply bg-accent-500;
+  }
+
+  .switch input:checked + span::after {
+    transform: translateX(20px);
+    @apply bg-white;
+  }
+
+  .range {
+    @apply h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-700 accent-accent-500;
+  }
+
+  .range::-webkit-slider-thumb {
+    @apply h-4 w-4 appearance-none rounded-full border-2 border-white bg-accent-500 shadow;
+  }
+
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-6;
+    animation: fade-up 160ms ease-out both;
+  }
+
+  .modal-panel {
+    @apply flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-ink-900 shadow-2xl shadow-black/50 sm:rounded-3xl;
+  }
+
+  .modal-panel-lg {
+    @apply max-w-6xl;
+  }
+
+  .modal-body {
+    @apply min-h-0 flex-1 overflow-y-auto p-4 sm:p-6;
+  }
+
+  .toast {
+    @apply pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-ink-850/95 p-3.5 text-sm text-slate-200 shadow-2xl shadow-black/40 backdrop-blur;
+    animation: fade-up 180ms ease-out both;
+  }
+
+  .prose-notes {
+    @apply text-sm leading-6 text-slate-300;
+  }
+
+  .prose-notes h1,
+  .prose-notes h2,
+  .prose-notes h3,
+  .prose-notes h4 {
+    @apply mb-2 mt-4 font-semibold tracking-tight text-slate-100 first:mt-0;
+  }
+
+  .prose-notes h1 {
+    @apply text-lg;
+  }
+
+  .prose-notes h2 {
+    @apply text-base;
+  }
+
+  .prose-notes h3 {
+    @apply text-sm uppercase tracking-wider text-slate-300;
+  }
+
+  .prose-notes p {
+    @apply my-2;
+  }
+
+  .prose-notes ul {
+    @apply my-2 list-disc space-y-1 pl-5;
+  }
+
+  .prose-notes ol {
+    @apply my-2 list-decimal space-y-1 pl-5;
+  }
+
+  .prose-notes a {
+    @apply text-accent-300 underline decoration-accent-400/40 underline-offset-2 hover:text-accent-200;
+  }
+
+  .prose-notes code {
+    @apply rounded bg-white/[0.08] px-1 py-0.5 font-mono text-[0.85em] text-slate-200;
+  }
+
+  .prose-notes pre {
+    @apply my-3 overflow-x-auto rounded-xl border border-white/10 bg-ink-950/80 p-3 font-mono text-xs;
+  }
+
+  .prose-notes pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .prose-notes blockquote {
+    @apply my-2 border-l-2 border-accent-400/40 pl-3 text-slate-400;
+  }
+
+  .prose-notes hr {
+    @apply my-4 border-white/10;
+  }
+
+  .skeleton {
+    @apply rounded-xl bg-gradient-to-r from-white/[0.03] via-white/[0.07] to-white/[0.03];
+    background-size: 800px 100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+
+  .chat-bubble-user {
+    @apply ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-accent-500/20 px-4 py-2.5 text-sm leading-6 text-slate-100 ring-1 ring-inset ring-accent-400/20;
+  }
+
+  .chat-bubble-assistant {
+    @apply mr-auto max-w-[92%] rounded-2xl rounded-bl-md border border-white/[0.06] bg-white/[0.035] px-4 py-2.5 text-sm leading-6 text-slate-200;
+  }
+
+  .gallery-tile {
+    @apply relative overflow-hidden rounded-2xl border border-white/[0.06] bg-ink-900 transition hover:border-accent-400/30 hover:shadow-glow;
+  }
+}
+
+/* Custom animations referenced by component rules above. Tailwind only emits
+   theme keyframes when the matching animate-* utility is used, so define these
+   explicitly. */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -400px 0;
+  }
+  to {
+    background-position: 400px 0;
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Light theme surface adjustments                                            */
+/* ------------------------------------------------------------------------- */
+
+html.light body {
+  background-image:
+    radial-gradient(70rem 40rem at 8% -10%, rgba(79, 70, 229, 0.1), transparent 60%),
+    radial-gradient(60rem 35rem at 110% 10%, rgba(14, 165, 233, 0.08), transparent 55%);
+}
+
+html.light .card {
+  box-shadow: 0 24px 60px -38px rgb(15 23 42 / 0.3);
+}
+
+html.light .modal-backdrop {
+  background-color: rgb(15 23 42 / 0.45);
+}
+
+html.light .modal-panel {
+  box-shadow: 0 30px 90px -35px rgb(15 23 42 / 0.4);
+}
+
+html.light .skeleton {
+  background-image: linear-gradient(
+    90deg,
+    rgb(15 23 42 / 0.03),
+    rgb(15 23 42 / 0.075),
+    rgb(15 23 42 / 0.03)
+  );
+}
+
+/* White-alpha surfaces become dark-alpha tints on a light background. */
+html.light [class~="bg-white/[0.015]"],
+html.light [class~="bg-white/[0.02]"],
+html.light [class~="bg-white/[0.025]"],
+html.light [class~="bg-white/[0.03]"],
+html.light [class~="bg-white/[0.035]"],
+html.light [class~="bg-white/[0.04]"],
+html.light [class~="bg-white/[0.05]"],
+html.light [class~="bg-white/[0.06]"] {
+  background-color: rgb(15 23 42 / 0.04);
+}
+
+html.light [class~="bg-white/[0.08]"],
+html.light [class~="bg-white/[0.1]"] {
+  background-color: rgb(15 23 42 / 0.075);
+}
+
+html.light [class~="hover:bg-white/[0.04]"]:hover,
+html.light [class~="hover:bg-white/[0.05]"]:hover,
+html.light [class~="hover:bg-white/[0.06]"]:hover {
+  background-color: rgb(15 23 42 / 0.055);
+}
+
+html.light [class~="hover:bg-white/[0.1]"]:hover {
+  background-color: rgb(15 23 42 / 0.085);
+}
+
+html.light [class~="border-white/[0.05]"],
+html.light [class~="border-white/[0.06]"],
+html.light [class~="border-white/[0.08]"],
+html.light [class~="border-white/10"] {
+  border-color: rgb(15 23 42 / 0.1);
+}
+
+html.light [class~="border-white/20"],
+html.light [class~="hover:border-white/20"]:hover {
+  border-color: rgb(15 23 42 / 0.18);
+}
+
+html.light [class~="divide-white/[0.05]"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(15 23 42 / 0.08);
+}
+
+/* Status/accent text needs darker shades on light surfaces. */
+html.light [class~="text-amber-100"],
+html.light [class~="text-amber-200"],
+html.light [class~="text-amber-300"] {
+  color: rgb(180 83 9);
+}
+
+html.light [class~="text-emerald-100"],
+html.light [class~="text-emerald-300"] {
+  color: rgb(4 120 87);
+}
+
+html.light [class~="text-rose-100"],
+html.light [class~="text-rose-200"],
+html.light [class~="text-rose-300"] {
+  color: rgb(190 18 60);
+}
+
+html.light [class~="text-sky-100"],
+html.light [class~="text-sky-300"] {
+  color: rgb(3 105 161);
+}
+
+html.light [class~="text-cyan-300"] {
+  color: rgb(14 116 144);
+}
+
+html.light [class~="text-violet-300"] {
+  color: rgb(109 40 217);
+}
+
+html.light [class~="text-fuchsia-300"] {
+  color: rgb(162 28 175);
+}
+
+html.light [class~="text-accent-200"],
+html.light [class~="text-accent-300"] {
+  color: rgb(67 56 202);
+}
+
+html.light .btn-danger {
+  color: rgb(190 18 60);
+}
+
+html.light .chip-success {
+  color: rgb(4 120 87);
+}
+
+html.light .chip-warn {
+  color: rgb(180 83 9);
+}
+
+html.light .chip-danger {
+  color: rgb(190 18 60);
+}
+
+html.light .nav-link-active .nav-icon {
+  color: rgb(67 56 202);
+}
+
+html.light .prose-notes a {
+  color: rgb(67 56 202);
+}
+
+html.light .prose-notes a:hover {
+  color: rgb(55 48 163);
+}
+
+/* Component classes compile their @apply colors, so override them directly. */
+html.light .card,
+html.light .card-soft,
+html.light .chat-bubble-assistant,
+html.light .gallery-tile,
+html.light .modal-panel,
+html.light .toast {
+  border-color: rgb(15 23 42 / 0.1);
+}
+
+html.light .card-soft,
+html.light .chat-bubble-assistant {
+  background-color: rgb(15 23 42 / 0.04);
+}
+
+html.light .card-header,
+html.light .prose-notes hr {
+  border-color: rgb(15 23 42 / 0.08);
+}
+
+html.light .input,
+html.light .select,
+html.light .textarea,
+html.light .switch,
+html.light .prose-notes pre {
+  border-color: rgb(15 23 42 / 0.12);
+}
+
+html.light .btn-secondary {
+  border-color: rgb(15 23 42 / 0.12);
+  background-color: rgb(15 23 42 / 0.045);
+}
+
+html.light .btn-secondary:hover {
+  border-color: rgb(15 23 42 / 0.2);
+  background-color: rgb(15 23 42 / 0.08);
+}
+
+html.light .btn-ghost:hover,
+html.light .icon-btn:hover,
+html.light .nav-link:hover {
+  background-color: rgb(15 23 42 / 0.06);
+}
+
+html.light .chip {
+  border-color: rgb(15 23 42 / 0.12);
+  background-color: rgb(15 23 42 / 0.04);
+}
+
+html.light .nav-icon {
+  background-color: rgb(15 23 42 / 0.045);
+}
+
+html.light .prose-notes code {
+  background-color: rgb(15 23 42 / 0.075);
+}

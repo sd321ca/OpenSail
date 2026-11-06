@@ -298,8 +298,8 @@ class ComfyUIClient:
     def fetch_audio(self, audio_ref: dict) -> str:
         """Download an audio file from ComfyUI and return a local file path.
 
-        Gradio's Audio component accepts a filepath, so the bytes are written
-        to a temporary file whose suffix matches the source filename.
+        The bytes are written to a temporary file whose suffix matches the
+        source filename so the browser can serve it with the right MIME type.
         """
         params = {
             "filename": audio_ref["filename"],
@@ -320,8 +320,8 @@ class ComfyUIClient:
     def fetch_video(self, video_ref: dict) -> str:
         """Download a video file from ComfyUI and return a local file path.
 
-        Gradio's Video component accepts a filepath, so the bytes are written
-        to a temporary file whose suffix matches the source filename.
+        The bytes are written to a temporary file whose suffix matches the
+        source filename so the browser can serve it with the right MIME type.
         """
         params = {
             "filename": video_ref["filename"],
@@ -352,7 +352,7 @@ class ComfyUIClient:
         """Download an image from ComfyUI and return (bytes, content_type).
 
         Used by the proxy route so the browser can load gallery images through
-        the Gradio server even when it cannot reach ComfyUI directly.
+        the dashboard server even when it cannot reach ComfyUI directly.
         """
         params = {
             "filename": image_ref["filename"],

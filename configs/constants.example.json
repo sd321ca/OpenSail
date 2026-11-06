@@ -1,8 +1,8 @@
 {
   "comfy_url": "http://127.0.0.1:8188",
-  "gradio_server_name": "0.0.0.0",
-  "gradio_server_port": 7860,
-  "gradio_server_public_access": false,
+  "server_name": "0.0.0.0",
+  "server_port": 7860,
+  "server_public_access": false,
   "show_unmatched_node_inputs": false,
   "default_workflow": "Image Gen - Text Input.json",
   "chat_n_ctx": 4096,

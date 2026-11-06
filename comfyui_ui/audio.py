@@ -1,10 +1,10 @@
-"""TextToSpeech tab: text-to-speech and voice cloning via audio.cpp.
+"""Text-to-speech and voice cloning via audio.cpp.
 
 audio.cpp (https://github.com/0xShug0/audio.cpp) ships ``audiocpp_server``, an
 OpenAI-compatible HTTP server over its ggml audio models. This module manages
 that server as an external subprocess, exactly like the Chat tab manages
 ``llama-server``: it is started **lazily** on the first request and can be
-stopped from the tab to free RAM/VRAM.
+stopped from the dashboard to free RAM/VRAM.
 
 The selectable models live in ``configs/audio_models.json`` (see
 :mod:`comfyui_ui.audio_models`). Their entries are compiled into a temporary
@@ -19,7 +19,6 @@ and the backend settings also live in ``configs/constants.json``.
 
 import json
 import os
-import queue
 import shutil
 import subprocess
 import tempfile
@@ -27,14 +26,9 @@ import threading
 import time
 import uuid
 
-import gradio as gr
 import requests
 
-from .audio_models import (
-    AUDIO_MODELS,
-    AUDIO_MODEL_CHOICES,
-    DEFAULT_AUDIO_MODEL_ID,
-)
+from .audio_models import AUDIO_MODELS
 from .config import (
     AUDIOCPP_BACKEND,
     AUDIOCPP_CONFIG_PATH,
@@ -48,6 +42,7 @@ from .config import (
     AUDIOCPP_THREADS,
     AUDIOCPP_VOICE_DIR,
 )
+from .errors import AppError
 
 
 def _find_cuda_bin_dirs() -> list:
@@ -189,7 +184,7 @@ def _convert_to_wav(path: str) -> str:
 
     Tries ffmpeg first (broad format support: mp3, flac, ogg/opus, m4a, webm,
     ...), then the ``soundfile`` library as a fallback. Already-WAV files are
-    returned unchanged. Raises ``gr.Error`` when no conversion is possible.
+    returned unchanged. Raises ``AppError`` when no conversion is possible.
     """
     if _is_wav(path):
         return path
@@ -220,11 +215,11 @@ def _convert_to_wav(path: str) -> str:
                 creationflags=creationflags,
             )
         except OSError as exc:
-            raise gr.Error(f"Could not run ffmpeg: {exc}") from exc
+            raise AppError(f"Could not run ffmpeg: {exc}") from exc
         if proc.returncode == 0 and os.path.isfile(out_path):
             return out_path
         detail = proc.stderr.decode("utf-8", "replace").strip()[:300]
-        raise gr.Error(
+        raise AppError(
             f"Could not convert the reference clip to WAV with ffmpeg: {detail}"
         )
 
@@ -237,7 +232,7 @@ def _convert_to_wav(path: str) -> str:
         sf.write(out_path, data, samplerate, subtype="PCM_16", format="WAV")
         return out_path
     except Exception as exc:  # noqa: BLE001
-        raise gr.Error(
+        raise AppError(
             "Could not convert the reference clip to WAV. Install ffmpeg (and "
             "set `audiocpp_ffmpeg_path` in configs/constants.json if it is not "
             f"on PATH) or upload a WAV file. ({exc})"
@@ -359,7 +354,7 @@ class AudioModel:
         return self._server is not None and self._server.poll() is None
 
     def status(self) -> str:
-        """A short human-readable status line for the tab."""
+        """A short human-readable status line for the TTS view."""
         if not self.loaded:
             return "audio.cpp server not running (it starts on the first generation)."
         return f"audio.cpp server running on {self._base_url}"
@@ -380,12 +375,12 @@ class AudioModel:
         """Spawn audiocpp_server (after clearing any stale listener) and wait."""
         server_path = os.path.expanduser((AUDIOCPP_SERVER_PATH or "").strip())
         if not server_path or not os.path.isfile(server_path):
-            raise gr.Error(
+            raise AppError(
                 "audiocpp_server not found. Set `audiocpp_server_path` in "
                 "configs/constants.json to your audiocpp_server executable."
             )
         if not AUDIO_MODELS:
-            raise gr.Error(
+            raise AppError(
                 "No audio.cpp models configured. Add entries to "
                 "configs/audio_models.json (see the _example there)."
             )
@@ -411,7 +406,7 @@ class AudioModel:
         while time.monotonic() < deadline and _port_listener_pids(AUDIOCPP_PORT):
             time.sleep(0.2)
         if _port_listener_pids(AUDIOCPP_PORT):
-            raise gr.Error(
+            raise AppError(
                 f"Port {AUDIOCPP_PORT} is already in use by another process. "
                 "Stop it (or change `audiocpp_port` in configs/constants.json) "
                 "and try again."
@@ -443,7 +438,7 @@ class AudioModel:
             )
         except OSError as exc:
             self._close_log()
-            raise gr.Error(f"Failed to start audiocpp_server: {exc}") from exc
+            raise AppError(f"Failed to start audiocpp_server: {exc}") from exc
 
         self._base_url = f"http://127.0.0.1:{AUDIOCPP_PORT}"
         self._wait_for_server()
@@ -484,7 +479,7 @@ class AudioModel:
                 message = f"audiocpp_server exited during startup (code {code})."
                 if tail:
                     message += f"\n\n{tail}"
-                raise gr.Error(message)
+                raise AppError(message)
             try:
                 resp = requests.get(health, timeout=2)
                 if resp.status_code == 200:
@@ -497,7 +492,7 @@ class AudioModel:
         message = "Timed out waiting for audiocpp_server to become ready."
         if tail:
             message += f"\n\n{tail}"
-        raise gr.Error(message)
+        raise AppError(message)
 
     def _close_locked(self) -> None:
         """Terminate the server and reclaim its memory. Lock must be held."""
@@ -546,7 +541,7 @@ class AudioModel:
             resp.raise_for_status()
             return list(resp.json().get("voices", []))
         except requests.RequestException as exc:
-            raise gr.Error(f"Could not list voices: {exc}") from exc
+            raise AppError(f"Could not list voices: {exc}") from exc
 
     def generate(
         self,
@@ -563,17 +558,16 @@ class AudioModel:
 
         The HTTP request runs on a background thread so the Stop button can
         make the generator return promptly; the final yield carries the WAV
-        path (``gr.Audio`` with ``type="filepath"``). Raises ``gr.Error`` on
-        failure.
+        path. Raises :class:`AppError` on failure.
 
         ``voice`` (a preset/native id) and ``voice_ref_path`` (a clone clip) are
         mutually exclusive; when a reference clip is given it takes precedence
         and ``voice`` is not sent.
         """
         if not text or not str(text).strip():
-            raise gr.Error("Please enter the text to speak.")
+            raise AppError("Please enter the text to speak.")
         if not model_id:
-            raise gr.Error("Please select a model.")
+            raise AppError("Please select a model.")
 
         self.load()
         # A fresh request clears any previous cancel request.
@@ -619,7 +613,7 @@ class AudioModel:
                 result["resp"] = resp
                 if resp.status_code != 200:
                     detail = resp.text[:500]
-                    result["error"] = gr.Error(
+                    result["error"] = AppError(
                         f"audiocpp_server error {resp.status_code}: {detail}"
                     )
                     return
@@ -662,13 +656,13 @@ class AudioModel:
 
             error = result["error"]
             if error is not None:
-                if isinstance(error, gr.Error):
+                if isinstance(error, AppError):
                     raise error
-                raise gr.Error(f"Lost connection to audiocpp_server: {error}")
+                raise AppError(f"Lost connection to audiocpp_server: {error}")
 
             data = result["bytes"] or b""
             if not data:
-                raise gr.Error("audiocpp_server returned no audio.")
+                raise AppError("audiocpp_server returned no audio.")
 
             out_path = os.path.join(
                 tempfile.gettempdir(), f"audiocpp_{uuid.uuid4().hex}.wav"
@@ -683,259 +677,3 @@ class AudioModel:
                     os.remove(converted_ref)
                 except OSError:
                     pass
-
-
-def build_audio_tab(model: AudioModel | None = None) -> AudioModel:
-    """Render the "TextToSpeech" tab inside the current Blocks context.
-
-    Shows a model dropdown (aliases from ``configs/audio_models.json``), a text
-    box, an optional voice / voice-cloning reference, and an audio output. The
-    audio.cpp server is started lazily; **Unload** stops it to free VRAM.
-    Returns the :class:`AudioModel` manager so callers can unload it elsewhere.
-    """
-    model = model or AudioModel()
-
-    if not AUDIO_MODEL_CHOICES:
-        gr.Markdown(
-            "### No audio.cpp models configured\n\n"
-            "Add text-to-speech entries to `configs/audio_models.json` "
-            "(there is an `_example` in the file), then reload the app.\n\n"
-            "Also check `audiocpp_server_path` and `audiocpp_models_dir` in "
-            "`configs/constants.json`."
-        )
-        return model
-
-    def do_load(model_id: str):
-        """Start the server and refresh the voice list from it.
-
-        Loading also enumerates the model's voices because the server is up
-        anyway, so the dropdown is ready without a separate Refresh click.
-        """
-        try:
-            status_message = model.load()
-        except gr.Error as exc:
-            return f"Error: {exc}", gr.update()
-        except Exception as exc:  # noqa: BLE001
-            return f"Error: {exc}", gr.update()
-
-        try:
-            voices = model.list_voices(model_id)
-        except Exception as exc:  # noqa: BLE001
-            return f"{status_message} (could not list voices: {exc})", gr.update()
-        if not voices:
-            return f"{status_message} No voices reported.", gr.update(
-                choices=[], value=None
-            )
-        return (
-            f"{status_message} Loaded {len(voices)} voice(s).",
-            gr.update(choices=voices, value=voices[0]),
-        )
-
-    def do_unload():
-        try:
-            message = model.unload()
-        except Exception as exc:  # noqa: BLE001
-            return f"Error: {exc}", gr.update()
-        # The server is gone, so the voice list is no longer valid.
-        return message, gr.update(choices=[], value=None)
-
-    def do_model_change(_model_id: str):
-        # The loaded model's voices are fetched from the server on Load/Refresh,
-        # so clear the list here rather than showing a configured default.
-        return gr.update(choices=[], value=None)
-
-    def do_list_voices(model_id: str):
-        try:
-            voices = model.list_voices(model_id)
-        except gr.Error as exc:
-            return gr.update(choices=[], value=None), f"Error: {exc}"
-        if not voices:
-            return gr.update(choices=[], value=None), "No voices reported."
-        return (
-            gr.update(choices=voices, value=voices[0]),
-            f"Loaded {len(voices)} voice(s).",
-        )
-
-    def do_save_voice(model_id, name, ref_audio, ref_text):
-        """Save the uploaded reference clip as a reusable named voice.
-
-        The clip is written to the shared audio.cpp voice library, so it then
-        appears in this tab's Voice dropdown and in the Chat tab's PocketTTS
-        voice list (both read the server's voice ids).
-        """
-        clean = _sanitize_voice_name(name)
-        if not clean:
-            return "Enter a name for the voice.", gr.update(), gr.update()
-        if not ref_audio or not os.path.isfile(ref_audio):
-            return "Add a reference clip to save.", gr.update(), gr.update()
-        try:
-            wav = _convert_to_wav(ref_audio)
-        except gr.Error as exc:
-            return f"Error: {exc}", gr.update(), gr.update()
-        try:
-            _save_voice_reference(AUDIOCPP_VOICE_DIR, clean, wav, ref_text)
-        except OSError as exc:
-            return f"Could not save voice: {exc}", gr.update(), gr.update()
-        finally:
-            if wav != ref_audio:
-                try:
-                    os.remove(wav)
-                except OSError:
-                    pass
-        # List voices (starting the server if needed) so the saved one is
-        # selectable immediately; fall back to just the name on failure.
-        try:
-            voices = model.list_voices(model_id)
-        except Exception:  # noqa: BLE001
-            voices = []
-        choices = voices or [clean]
-        value = clean if clean in choices else choices[0]
-        return (
-            f"Saved voice `{clean}`. It is also available to the Chat tab.",
-            gr.update(choices=choices, value=value),
-            gr.update(value=""),
-        )
-
-    def do_generate(
-        model_id,
-        text,
-        voice,
-        speed,
-        seed,
-        max_tokens,
-        voice_ref,
-        reference_text,
-        progress=gr.Progress(),
-    ):
-        try:
-            for status, audio in model.generate(
-                model_id=model_id,
-                text=text,
-                voice=voice,
-                speed=speed,
-                seed=seed,
-                max_tokens=max_tokens,
-                voice_ref_path=voice_ref,
-                reference_text=reference_text,
-            ):
-                progress(0.0, desc=status)
-                yield status, audio
-        except gr.Error as exc:
-            raise gr.Error(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            raise gr.Error(f"Audio generation failed: {exc}")
-
-    with gr.Row():
-        model_dd = gr.Dropdown(
-            choices=AUDIO_MODEL_CHOICES,
-            value=DEFAULT_AUDIO_MODEL_ID,
-            label="Model",
-            scale=4,
-        )
-        load_btn = gr.Button("Load", variant="secondary", scale=1)
-        unload_btn = gr.Button("Unload", variant="stop", scale=1)
-
-    status = gr.Markdown(model.status())
-
-    text_box = gr.Textbox(
-        label="Text",
-        lines=4,
-        placeholder="Type the text to speak...",
-    )
-
-    with gr.Row():
-        # Voices are only known once the model is loaded (they come from the
-        # server), so start empty instead of guessing the configured default.
-        voice_dd = gr.Dropdown(
-            choices=[],
-            value=None,
-            label="Voice",
-            allow_custom_value=True,
-            info="A preset/native voice id. Load the model (or Refresh) to "
-            "list its voices, including saved clones; you can also type one.",
-            scale=3,
-        )
-        refresh_btn = gr.Button("Refresh voices", scale=1)
-        speed_sl = gr.Slider(
-            0.5,
-            2.0,
-            step=0.05,
-            value=1.0,
-            label="Speed",
-            info="Speech-rate multiplier. 1.0 is always safe; some models "
-            "(e.g. PocketTTS) reject other values.",
-            scale=2,
-        )
-
-    with gr.Accordion("Voice cloning (optional)", open=False):
-        ref_audio = gr.Audio(
-            label="Reference clip (converted to WAV; overrides Voice)",
-            type="filepath",
-            sources=["upload", "microphone"],
-        )
-        ref_text = gr.Textbox(
-            label="Reference transcript",
-            lines=2,
-            info="What is said in the reference clip (improves cloning).",
-        )
-        with gr.Row():
-            voice_name_box = gr.Textbox(
-                label="Save clone as voice",
-                placeholder="e.g. morgan",
-                info="Adds the clip to the shared voice library so it can be "
-                "reused by name here and in the Chat tab.",
-                scale=3,
-            )
-            save_voice_btn = gr.Button("Save voice", scale=1)
-        save_voice_status = gr.Markdown()
-
-    with gr.Row():
-        seed_num = gr.Number(label="Seed", value=0, precision=0, scale=1)
-        max_tokens_num = gr.Number(
-            label="Max tokens (0 = model default)", value=0, precision=0, scale=1
-        )
-
-    with gr.Row():
-        generate_btn = gr.Button("Generate", variant="primary")
-        stop_btn = gr.Button("Stop", variant="stop")
-
-    audio_out = gr.Audio(label="Result", type="filepath")
-
-    gr.Markdown(
-        "Speech is generated by [audio.cpp](https://github.com/0xShug0/audio.cpp) "
-        "(`audiocpp_server`), started automatically on the first run. "
-        "Press **Unload** to stop it and free VRAM before a ComfyUI generation."
-    )
-
-    load_btn.click(fn=do_load, inputs=[model_dd], outputs=[status, voice_dd])
-    unload_btn.click(fn=do_unload, inputs=None, outputs=[status, voice_dd])
-    model_dd.change(fn=do_model_change, inputs=[model_dd], outputs=[voice_dd])
-    refresh_btn.click(
-        fn=do_list_voices, inputs=[model_dd], outputs=[voice_dd, status]
-    )
-    save_voice_btn.click(
-        fn=do_save_voice,
-        inputs=[model_dd, voice_name_box, ref_audio, ref_text],
-        outputs=[save_voice_status, voice_dd, voice_name_box],
-    )
-    # Abort the in-flight request. concurrency_limit=None lets it run while the
-    # streaming generate event is still active (otherwise it would queue).
-    stop_btn.click(
-        fn=model.cancel, inputs=None, outputs=None, concurrency_limit=None
-    )
-    generate_btn.click(
-        fn=do_generate,
-        inputs=[
-            model_dd,
-            text_box,
-            voice_dd,
-            speed_sl,
-            seed_num,
-            max_tokens_num,
-            ref_audio,
-            ref_text,
-        ],
-        outputs=[status, audio_out],
-    )
-
-    return model

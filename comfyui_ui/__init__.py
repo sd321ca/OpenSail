@@ -1,38 +1,23 @@
-"""ComfyUI Workflow UI package.
+"""OpenSail: a local dashboard for ComfyUI workflows, chat and speech.
 
-A small Gradio front-end for running ComfyUI workflows and browsing the
-images they produce.
+The HTTP API and static frontend live in :mod:`comfyui_ui.server` and the
+``web`` folder. Run the app with ``python app.py``.
 """
 
-from .assets import APP_JS, MOBILE_CSS
-from .audio import AudioModel, build_audio_tab
-from .chat import ChatModel, build_chat_tab
 from .config import (
-    ASPECT_RATIOS,
+    APP_AUTH,
     COMFY_URL,
     DEFAULT_WORKFLOW,
-    GRADIO_AUTH,
-    GRADIO_SERVER_NAME,
-    GRADIO_SERVER_PORT,
-    GRADIO_SERVER_PUBLIC_ACCESS
+    SERVER_NAME,
+    SERVER_PORT,
+    SERVER_PUBLIC_ACCESS,
 )
-from .fields import get_fields
-from .ui import build_ui
 
 __all__ = [
-    "APP_JS",
-    "ASPECT_RATIOS",
+    "APP_AUTH",
     "COMFY_URL",
     "DEFAULT_WORKFLOW",
-    "GRADIO_AUTH",
-    "GRADIO_SERVER_NAME",
-    "GRADIO_SERVER_PORT",
-    "GRADIO_SERVER_PUBLIC_ACCESS",
-    "MOBILE_CSS",
-    "AudioModel",
-    "ChatModel",
-    "build_audio_tab",
-    "build_chat_tab",
-    "build_ui",
-    "get_fields",
+    "SERVER_NAME",
+    "SERVER_PORT",
+    "SERVER_PUBLIC_ACCESS",
 ]
