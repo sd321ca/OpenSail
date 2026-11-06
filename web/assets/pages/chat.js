@@ -68,7 +68,8 @@ export async function renderChat(root, ctx) {
   let statusText = boot.chat_loaded ? boot.chat_status : "No model loaded. It loads on the first message.";
   let phaseText = "";
 
-  const modelOptions = (boot.chat_models || [])
+  const chatModels = boot.chat_models || [];
+  const modelOptions = chatModels
     .map(
       (model) =>
         `<option value="${escapeHtml(model.path)}" ${model.path === settings.model ? "selected" : ""}>${escapeHtml(model.alias)}</option>`,
@@ -95,6 +96,9 @@ export async function renderChat(root, ctx) {
   const form = $("[data-composer]");
   const sendButton = $("[data-send]");
   const stopButton = $("[data-stop]");
+  const modelSelect = $("[data-model]");
+  const attachLabel = $("[data-attach]");
+  const fileInput = $("[data-file]");
   const attachmentsEl = $("[data-attachments]");
   const chatStatus = $("[data-chat-status]");
   const phaseChip = $("[data-chat-phase]");
@@ -110,7 +114,7 @@ export async function renderChat(root, ctx) {
   const pocketVoiceWrap = $("[data-pocket-voice-wrap]");
   const pocketModel = speechModel?.id || "";
 
-  $("[data-model]").innerHTML =
+  modelSelect.innerHTML =
     modelOptions || '<option value="">No models configured</option>';
   systemInput.value = settings.systemPrompt;
   thinkingInput.checked = settings.thinking;
@@ -245,7 +249,24 @@ export async function renderChat(root, ctx) {
     });
   }
 
-  $("[data-file]")?.addEventListener("change", async (event) => {
+  function updateAttachAvailability() {
+    const model = chatModels.find((entry) => entry.path === modelSelect.value);
+    const multimodal = Boolean(model?.multimodal);
+    attachLabel.classList.toggle("cursor-pointer", multimodal);
+    attachLabel.classList.toggle("cursor-not-allowed", !multimodal);
+    attachLabel.classList.toggle("opacity-40", !multimodal);
+    attachLabel.setAttribute("aria-disabled", String(!multimodal));
+    attachLabel.title = multimodal
+      ? "Attach an image"
+      : "This model does not support images";
+    fileInput.disabled = !multimodal;
+    if (!multimodal && pendingImages.length) {
+      pendingImages = [];
+      renderAttachments();
+    }
+  }
+
+  fileInput.addEventListener("change", async (event) => {
     const files = [...(event.target.files || [])];
     event.target.value = "";
     for (const file of files) {
@@ -379,7 +400,7 @@ export async function renderChat(root, ctx) {
     try {
       const result = await api("/api/chat/load", {
         method: "POST",
-        body: { path: $("[data-model]").value },
+        body: { path: modelSelect.value },
       });
       setModelStatus(result.status, result.loaded);
       toast("Chat model loaded.", "success");
@@ -404,9 +425,10 @@ export async function renderChat(root, ctx) {
     }
   });
 
-  $("[data-model]")?.addEventListener("change", () => {
-    settings.model = $("[data-model]").value;
+  modelSelect.addEventListener("change", () => {
+    settings.model = modelSelect.value;
     saveSettings(settings);
+    updateAttachAvailability();
   });
 
   /* ---------------------------------------------------------------- */
@@ -564,6 +586,7 @@ export async function renderChat(root, ctx) {
   renderMessages();
   setRunning(false);
   setModelStatus(statusText, boot.chat_loaded);
+  updateAttachAvailability();
 
   return () => {
     if (running) {

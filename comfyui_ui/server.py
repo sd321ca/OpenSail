@@ -328,7 +328,15 @@ def _audio_model_payload() -> list:
 
 
 def _chat_model_payload() -> list:
-    return [{"alias": alias, "path": path} for alias, path, _mmproj in CHAT_MODELS]
+    return [
+        {
+            "alias": alias,
+            "path": path,
+            # A vision projector is what makes image attachments usable.
+            "multimodal": bool(mmproj),
+        }
+        for alias, path, mmproj in CHAT_MODELS
+    ]
 
 
 def _synthesize_reply(text: str, voice: str | None) -> str | None:
