@@ -99,6 +99,9 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
 
 ## Pages
 
+<img width="750" height="1325" alt="features" src="https://github.com/user-attachments/assets/01fa2f2f-7e1b-4a19-8ee7-3f1dfb59c804" />
+
+
 - **Chat** — talk to a local GGUF model served by
   [llama-server](https://github.com/ggml-org/llama.cpp), launched as a
   subprocess so it can use the GPU. Pick a **Model** from the dropdown
@@ -133,7 +136,8 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   > `llama-cpp-python` build is required, which sidesteps the AVX-512
   > incompatibility of its prebuilt CUDA wheels on 12th/13th-gen Intel CPUs.
 
-  <img width="1082" height="3743" alt="chat" src="https://github.com/user-attachments/assets/adbb11b2-f778-46e4-a0c0-bcdfd79aee3a" />
+  <img width="375" height="1286" alt="chat2" src="https://github.com/user-attachments/assets/571e1b7b-1e01-420f-8119-84314cdb7331" />
+
 
 - **Generate** — pick a workflow, choose which node inputs to control, and
   generate an image, a song or a video. Press **Choose inputs…** to open a
@@ -165,10 +169,10 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
     ComfyUI and used as that node's video before the workflow runs. Press
     **Load from Gallery** beside the heading to pick one of the videos you have
     already generated instead of uploading a file.
+    
+<img width="634" height="351" alt="choose_inputs2" src="https://github.com/user-attachments/assets/2c249c2a-d2cb-451b-9781-85abf5e61748" />
 
-<img width="692" height="565" alt="workflow config" src="https://github.com/user-attachments/assets/4cd3ac9f-5d5b-4aef-825c-d691351d2177" />
-
-<img width="433" height="1696" alt="generate" src="https://github.com/user-attachments/assets/0626817d-372c-425f-8f47-f504412ff2da" />
+<img width="375" height="1674" alt="generation2" src="https://github.com/user-attachments/assets/59751a09-2997-45f4-b3f8-329f7c4c15c4" />
  
 - **Text to Speech** — text-to-speech and voice cloning via
   [audio.cpp](https://github.com/0xShug0/audio.cpp). Pick a model (aliases from
@@ -192,6 +196,9 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   history. Each file is shown as an inline video player labelled with its
   filename and prompt. Use **Refresh** to reload and the slider to cap how many
   files are loaded.
+
+  <img width="375" height="687" alt="gallery2" src="https://github.com/user-attachments/assets/38088c6f-180e-4fec-afdf-06bf7264449c" />
+
 
 ## Adding workflows
 
