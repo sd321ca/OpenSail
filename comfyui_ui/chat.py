@@ -370,6 +370,15 @@ class ChatModel:
         """
         self._cancel_event.set()
 
+    def reset_cancel(self) -> None:
+        """Clear a cancel request before starting a new reply."""
+        self._cancel_event.clear()
+
+    @property
+    def cancelled(self) -> bool:
+        """True while the current reply has been asked to stop."""
+        return self._cancel_event.is_set()
+
     def stream(self, messages: list, enable_thinking: bool | None = None):
         """Yield the assistant reply for ``messages``, one chunk at a time.
 
@@ -382,8 +391,11 @@ class ChatModel:
         """
         if not self.loaded:
             self.load()
-        # A fresh request clears any previous cancel request.
-        self._cancel_event.clear()
+        # The server clears the flag when a request starts, but it may have
+        # been set while the model was loading. Check again so Stop pressed
+        # during a lazy load does not start generating anyway.
+        if self._cancel_event.is_set():
+            return
         yield from self._stream_server(messages, enable_thinking)
 
     def _stream_server(self, messages: list, enable_thinking: bool | None):
@@ -394,6 +406,9 @@ class ChatModel:
         cancel flag each time — so a stalled generation can still be aborted
         promptly rather than only at the next token.
         """
+        if self._cancel_event.is_set():
+            return
+
         payload: dict = {"messages": messages, "stream": True}
         if enable_thinking is not None:
             payload["chat_template_kwargs"] = {

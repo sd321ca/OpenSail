@@ -954,6 +954,9 @@ def _chat_messages(body: ChatBody) -> list:
 
 
 def _chat_events(body: ChatBody):
+    # A cancel clicked after the previous stream ended can still be in flight;
+    # clear it here so it cannot abort this new reply.
+    chat_model.reset_cancel()
     try:
         messages = _chat_messages(body)
         if not messages:
@@ -991,7 +994,11 @@ def _chat_events(body: ChatBody):
             yield _sse({"type": "error", "message": f"Chat failed: {exc}"})
             return
 
-        if body.speak_engine == "pocket" and text.strip():
+        if (
+            body.speak_engine == "pocket"
+            and text.strip()
+            and not chat_model.cancelled
+        ):
             yield _sse(
                 {"type": "phase", "message": "Synthesizing the reply..."}
             )

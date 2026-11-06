@@ -57,44 +57,8 @@ export async function renderChat(root, ctx) {
   const ttsModels = boot.tts_models || [];
 
   root.innerHTML = `
-    <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-      <section class="card flex h-[calc(100dvh-8.5rem)] min-h-[540px] flex-col overflow-hidden" style="max-height: 58rem">
-        <div class="flex flex-wrap items-center gap-3 border-b border-white/[0.06] px-4 py-3 sm:px-5">
-          <div class="flex items-center gap-2.5">
-            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-500/10 text-accent-300">${icon("chat", "h-4 w-4")}</span>
-            <div class="min-w-0">
-              <h2 class="text-sm font-semibold text-slate-100">Conversation</h2>
-              <p class="truncate text-[11px] text-slate-500" data-chat-status>${escapeHtml(statusText)}</p>
-            </div>
-          </div>
-          <div class="ml-auto flex items-center gap-2">
-            <span class="chip hidden sm:inline-flex" data-chat-phase></span>
-            <button class="btn-ghost btn-xs" data-new-chat>${icon("plus", "h-4 w-4")} New chat</button>
-          </div>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto" data-messages aria-live="polite"></div>
-
-        <form class="border-t border-white/[0.06] bg-ink-950/40 p-3 sm:p-4" data-composer>
-          <div class="rounded-2xl border border-white/10 bg-ink-950/70 p-2 transition focus-within:border-accent-400/40 focus-within:ring-2 focus-within:ring-accent-500/10">
-            <div class="hidden flex-wrap gap-2 px-1 pb-2" data-attachments></div>
-            <textarea class="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500" rows="1" placeholder="Send a message…" data-input></textarea>
-            <div class="flex items-center gap-1.5 px-1 pt-1.5">
-              <label class="icon-btn cursor-pointer" title="Attach an image">
-                ${icon("attach", "h-5 w-5")}
-                <input type="file" accept="image/*" multiple class="sr-only" data-file />
-              </label>
-              <span class="text-[11px] text-slate-600">Enter to send · Shift+Enter for a new line</span>
-              <div class="ml-auto flex items-center gap-2">
-                <button type="button" class="btn-danger btn-xs hidden" data-stop>${icon("stop", "h-4 w-4")} Stop</button>
-                <button type="submit" class="btn-primary btn-xs" data-send>${icon("send", "h-4 w-4")} Send</button>
-              </div>
-            </div>
-          </div>
-        </form>
-      </section>
-
-      <aside class="space-y-5">
+    <div class="flex min-h-[calc(100dvh-8.5rem)] flex-col gap-5">
+      <div class="grid items-start gap-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <section class="card">
           <div class="card-header">
             <div class="flex items-center gap-2.5">
@@ -165,7 +129,43 @@ export async function renderChat(root, ctx) {
             </div>
           </div>
         </section>
-      </aside>
+      </div>
+
+      <section class="card flex min-h-[26rem] flex-1 flex-col overflow-hidden" style="max-height: 58rem">
+        <div class="flex flex-wrap items-center gap-3 border-b border-white/[0.06] px-4 py-3 sm:px-5">
+          <div class="flex items-center gap-2.5">
+            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-500/10 text-accent-300">${icon("chat", "h-4 w-4")}</span>
+            <div class="min-w-0">
+              <h2 class="text-sm font-semibold text-slate-100">Conversation</h2>
+              <p class="truncate text-[11px] text-slate-500" data-chat-status>${escapeHtml(statusText)}</p>
+            </div>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <span class="chip hidden sm:inline-flex" data-chat-phase></span>
+            <button class="btn-ghost btn-xs" data-new-chat>${icon("plus", "h-4 w-4")} New chat</button>
+          </div>
+        </div>
+
+        <div class="min-h-0 flex-1 overflow-y-auto" data-messages aria-live="polite"></div>
+
+        <form class="border-t border-white/[0.06] bg-ink-950/40 p-3 sm:p-4" data-composer>
+          <div class="rounded-2xl border border-white/10 bg-ink-950/70 p-2 transition focus-within:border-accent-400/40 focus-within:ring-2 focus-within:ring-accent-500/10">
+            <div class="hidden flex-wrap gap-2 px-1 pb-2" data-attachments></div>
+            <textarea class="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500" rows="1" placeholder="Send a message…" data-input></textarea>
+            <div class="flex items-center gap-1.5 px-1 pt-1.5">
+              <label class="icon-btn cursor-pointer" title="Attach an image">
+                ${icon("attach", "h-5 w-5")}
+                <input type="file" accept="image/*" multiple class="sr-only" data-file />
+              </label>
+              <span class="text-[11px] text-slate-600">Enter to send · Shift+Enter for a new line</span>
+              <div class="ml-auto flex items-center gap-2">
+                <button type="button" class="btn-danger btn-xs" data-stop disabled>${icon("stop", "h-4 w-4")} Stop</button>
+                <button type="submit" class="btn-primary btn-xs" data-send>${icon("send", "h-4 w-4")} Send</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
     </div>
   `;
 
@@ -254,7 +254,7 @@ export async function renderChat(root, ctx) {
           <div class="flex gap-2.5 px-4 py-2 sm:px-5" data-message="${index}">
             <span class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-500/10 text-accent-300">${icon("sparkles", "h-4 w-4")}</span>
             <div class="chat-bubble-assistant min-w-0">
-              <div class="prose-notes" data-bubble>${renderMarkdown(message.content) || '<span class="text-slate-500">Thinking…</span>'}</div>
+              <div class="prose-notes" data-bubble>${renderMarkdown(message.content) || `<span class="text-slate-500">${message.stopped ? "Stopped." : "Thinking…"}</span>`}</div>
               ${message.streaming ? '<span class="mt-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-accent-400 align-middle"></span>' : ""}
             </div>
           </div>
@@ -271,7 +271,7 @@ export async function renderChat(root, ctx) {
       renderMessages();
       return;
     }
-    node.innerHTML = renderMarkdown(message.content) || '<span class="text-slate-500">Thinking…</span>';
+    node.innerHTML = renderMarkdown(message.content) || `<span class="text-slate-500">${message.stopped ? "Stopped." : "Thinking…"}</span>`;
     const cursor = node.parentElement.querySelector(".animate-pulse");
     if (!message.streaming) cursor?.remove();
     scrollToBottom();
@@ -475,7 +475,7 @@ export async function renderChat(root, ctx) {
     running = value;
     sendButton.disabled = value;
     sendButton.innerHTML = value ? `${spinner("h-3.5 w-3.5")} Sending…` : `${icon("send", "h-4 w-4")} Send`;
-    stopButton.classList.toggle("hidden", !value);
+    stopButton.disabled = !value;
   }
 
   function setPhase(text) {
@@ -516,6 +516,7 @@ export async function renderChat(root, ctx) {
         images: (message.images || []).map((image) => image.id),
       }));
 
+    let aborted = false;
     try {
       await stream(
         "/api/chat/stream",
@@ -553,32 +554,41 @@ export async function renderChat(root, ctx) {
         controller.signal,
       );
     } catch (error) {
-      if (error.name !== "AbortError") {
+      if (error.name === "AbortError") {
+        aborted = true;
+      } else {
         assistant.content = assistant.content
           ? `${assistant.content}\n\n**Error:** ${error.message}`
           : `**Error:** ${error.message}`;
         toast(error.message, "error");
       }
     } finally {
+      if (aborted && !assistant.content) assistant.stopped = true;
       assistant.streaming = false;
       renderMessages();
       setRunning(false);
       setPhase("");
       controller = null;
-      if (settings.engine === "browser" && assistant.content) {
+      if (!aborted && settings.engine === "browser" && assistant.content) {
         speakReply(assistant.content);
       }
     }
   }
 
   async function stopGenerating() {
-    try {
-      await api("/api/chat/cancel", { method: "POST" });
-      controller?.abort();
-      toast("Stopping reply…", "warning", 1800);
-    } catch (error) {
+    if (!running) return;
+    stopButton.disabled = true;
+    let failed = false;
+    // Fire the cancel request first, then abort the local stream so the UI
+    // responds immediately instead of waiting for the round trip.
+    const cancel = api("/api/chat/cancel", { method: "POST" }).catch((error) => {
+      failed = true;
       toast(error.message, "error");
-    }
+    });
+    controller?.abort();
+    setPhase("Stopping…");
+    await cancel;
+    if (!failed) toast("Stopped the reply.", "warning", 1800);
   }
 
   form.addEventListener("submit", (event) => {
@@ -598,7 +608,10 @@ export async function renderChat(root, ctx) {
   stopButton.addEventListener("click", stopGenerating);
 
   $("[data-new-chat]")?.addEventListener("click", () => {
-    if (running) controller?.abort();
+    if (running) {
+      controller?.abort();
+      api("/api/chat/cancel", { method: "POST" }).catch(() => {});
+    }
     messages.length = 0;
     pendingImages = [];
     renderAttachments();
