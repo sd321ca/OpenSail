@@ -417,7 +417,20 @@ class ChatModel:
         url = f"{self._base_url}/v1/chat/completions"
 
         chunks: "queue.Queue[str | None]" = queue.Queue()
-        state: dict = {"resp": None, "error": None}
+        state: dict = {"resp": None, "error": None, "closing": False}
+        state_lock = threading.Lock()
+
+        def _close_response() -> None:
+            """Close the HTTP response exactly once, from any thread."""
+            with state_lock:
+                resp = state.get("resp")
+                if resp is None or state.get("closed"):
+                    return
+                state["closed"] = True
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
 
         def _read() -> None:
             try:
@@ -439,10 +452,16 @@ class ChatModel:
                         break
                     chunks.put(line)
             except Exception as exc:  # noqa: BLE001
-                # A close triggered by cancel() is expected, not an error.
-                if not self._cancel_event.is_set():
+                # A close triggered by cancel() or by the end of the stream is
+                # expected, not an error.
+                if not self._cancel_event.is_set() and not state["closing"]:
                     state["error"] = exc
             finally:
+                # Close from the thread doing the reading. Closing the response
+                # from the consumer while urllib3 is still mid-read used to
+                # raise "'NoneType' object has no attribute 'readline'" (and can
+                # block on Windows).
+                _close_response()
                 chunks.put(None)
 
         reader = threading.Thread(
@@ -479,12 +498,19 @@ class ChatModel:
                     yield text
         finally:
             # Abort the HTTP request so llama-server stops generating too.
-            resp = state.get("resp")
-            if resp is not None:
-                try:
-                    resp.close()
-                except Exception:  # noqa: BLE001
-                    pass
+            state["closing"] = True
+            # Give the reader a moment to finish the response on its own: if
+            # the server ends the stream normally there is no need to close it
+            # from here at all, which avoids the cross-thread race above.
+            reader.join(timeout=1.0)
+            if reader.is_alive():
+                # The server has not finished the response; close it from a
+                # helper thread so a blocked close cannot stall the reply.
+                threading.Thread(
+                    target=_close_response,
+                    name="llama-server-close",
+                    daemon=True,
+                ).start()
 
         error = state.get("error")
         if error is not None and not self._cancel_event.is_set():

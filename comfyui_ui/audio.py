@@ -603,7 +603,13 @@ class AudioModel:
                 payload["reference_text"] = str(reference_text)
 
         url = f"{self._base_url}/v1/audio/speech"
-        result: dict = {"bytes": None, "error": None, "done": False, "resp": None}
+        result: dict = {
+            "bytes": None,
+            "error": None,
+            "done": False,
+            "resp": None,
+            "closing": False,
+        }
 
         def _run() -> None:
             try:
@@ -626,7 +632,7 @@ class AudioModel:
                 result["bytes"] = bytes(data)
             except Exception as exc:  # noqa: BLE001
                 # A close triggered by cancel() is expected, not an error.
-                if not self._cancel_event.is_set():
+                if not self._cancel_event.is_set() and not result["closing"]:
                     result["error"] = exc
             finally:
                 result["done"] = True
@@ -640,6 +646,7 @@ class AudioModel:
             yield "Generating audio...", None
             while not result["done"]:
                 if self._cancel_event.is_set():
+                    result["closing"] = True
                     resp = result.get("resp")
                     if resp is not None:
                         try:
