@@ -152,7 +152,7 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
 
 ## Pages
 
-<img width="750" height="1325" alt="features" src="https://github.com/user-attachments/assets/01fa2f2f-7e1b-4a19-8ee7-3f1dfb59c804" />
+<img width="287" height="668" alt="features2" src="https://github.com/user-attachments/assets/7a5407f1-ce81-44bb-bc3a-b3bc42ee9e9f" />
 
 - **Chat** — talk to a local GGUF model served by
   [llama-server](https://github.com/ggml-org/llama.cpp), launched as a
@@ -188,7 +188,9 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   > `llama-cpp-python` build is required, which sidesteps the AVX-512
   > incompatibility of its prebuilt CUDA wheels on 12th/13th-gen Intel CPUs.
 
-  <img width="375" height="1286" alt="chat2" src="https://github.com/user-attachments/assets/571e1b7b-1e01-420f-8119-84314cdb7331" />
+  <img width="405" height="900" alt="chat-a2" src="https://github.com/user-attachments/assets/d81e5266-de41-4f17-a64a-a5da4b1fb29b" />
+
+  <img width="405" height="694" alt="chat-b2" src="https://github.com/user-attachments/assets/4a254bed-f44b-4cbd-b1c2-3a9ae7e7bef6" />
 
 - **Generate** — pick a workflow, choose which node inputs to control, and
   generate an image, a song or a video. Press **Choose inputs…** to open a
@@ -221,9 +223,9 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
     **Load from Gallery** beside the heading to pick one of the videos you have
     already generated instead of uploading a file.
 
-<img width="634" height="351" alt="choose_inputs2" src="https://github.com/user-attachments/assets/2c249c2a-d2cb-451b-9781-85abf5e61748" />
+<img width="1213" height="541" alt="inputs2" src="https://github.com/user-attachments/assets/a6d0d712-f351-4c2b-bb02-ca02d7d033b5" />
 
-<img width="375" height="1674" alt="generation2" src="https://github.com/user-attachments/assets/59751a09-2997-45f4-b3f8-329f7c4c15c4" />
+<img width="900" height="1393" alt="generation2" src="https://github.com/user-attachments/assets/bbdc394d-3de2-4d03-9549-cd3049d0da45" />
  
 - **Text to Speech** — text-to-speech and voice cloning via
   [audio.cpp](https://github.com/0xShug0/audio.cpp). Pick a model (aliases from
