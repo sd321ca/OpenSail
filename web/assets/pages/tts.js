@@ -63,9 +63,8 @@ export async function renderTTS(root, ctx) {
             <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_15rem]">
               <div>
                 <label class="label" for="tts-voice">Voice</label>
-                <input id="tts-voice" class="input" list="tts-voice-list" data-voice placeholder="Preset, native id or saved clone" />
-                <datalist id="tts-voice-list" data-voice-list></datalist>
-                <p class="mt-1 text-[11px] text-slate-500">Load the model or refresh to list its voices. You can also type an id.</p>
+                <select id="tts-voice" class="select" data-voice aria-label="Voice"></select>
+                <p class="mt-1 text-[11px] text-slate-500">Load the model or refresh to list its voices.</p>
               </div>
               <div>
                 <div class="flex items-center justify-between gap-2"><label class="label" for="tts-speed">Speed</label><span class="text-[11px] font-mono text-slate-500" data-speed-label>1.00×</span></div>
@@ -147,7 +146,6 @@ export async function renderTTS(root, ctx) {
   const $ = (selector) => root.querySelector(selector);
   const modelSelect = $("[data-model]");
   const voiceInput = $("[data-voice]");
-  const voiceList = $("[data-voice-list]");
   const status = $("[data-status]");
   const modelChip = $("[data-model-chip]");
   const phaseWrap = $("[data-phase-wrap]");
@@ -172,13 +170,24 @@ export async function renderTTS(root, ctx) {
   }
 
   function renderVoices() {
-    voiceList.innerHTML = voices
-      .map((voice) => `<option value="${escapeHtml(voice)}"></option>`)
-      .join("");
+    if (!voices.length) {
+      voiceInput.innerHTML = '<option value="">Default voice</option>';
+      voiceInput.disabled = true;
+    } else {
+      voiceInput.disabled = false;
+      const previous = voiceInput.value;
+      const selected = voices.includes(previous) ? previous : voices[0];
+      voiceInput.innerHTML = voices
+        .map(
+          (voice) =>
+            `<option value="${escapeHtml(voice)}" ${voice === selected ? "selected" : ""}>${escapeHtml(voice)}</option>`,
+        )
+        .join("");
+      voiceInput.value = selected;
+    }
     $("[data-voice-status]").textContent = voices.length
       ? `${voices.length} voice${voices.length === 1 ? "" : "s"} available.`
       : "Voices are listed from the running server.";
-    if (voices.length && !voiceInput.value) voiceInput.value = voices[0];
   }
 
   function renderResult() {
@@ -317,7 +326,7 @@ export async function renderTTS(root, ctx) {
         {
           model_id: modelId,
           text,
-          voice: voiceInput.value.trim() || null,
+          voice: voiceInput.value || null,
           speed: Number(speedNumber.value) || 1,
           seed: Number($("[data-seed]").value) || 0,
           max_tokens: Number($("[data-max-tokens]").value) || 0,
