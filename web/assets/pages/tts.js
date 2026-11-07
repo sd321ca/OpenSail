@@ -55,7 +55,7 @@ export async function renderTTS(root, ctx) {
                   </div>`
                 : `<div class="rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-200">No audio.cpp models configured. Add entries to <code class="font-mono">configs/audio_models.json</code>.</div>`
             }
-            <p class="rounded-lg border border-white/[0.05] bg-white/[0.02] px-3 py-2 text-[11px] leading-5 text-slate-500" data-status>${escapeHtml(statusText)}</p>
+            <p class="rounded-lg border border-subtle bg-raised px-3 py-2 text-[11px] leading-5 text-slate-500" data-status>${escapeHtml(statusText)}</p>
             <div>
               <label class="label" for="tts-text">Text</label>
               <textarea id="tts-text" class="textarea min-h-[9rem]" rows="6" data-text placeholder="Type the text to speak…"></textarea>
@@ -95,8 +95,8 @@ export async function renderTTS(root, ctx) {
               </div>
               <span class="text-slate-500 transition group-open:rotate-180">${icon("chevron", "h-4 w-4")}</span>
             </summary>
-            <div class="space-y-4 border-t border-white/[0.06] p-4 sm:p-5">
-              <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3" data-ref-panel></div>
+            <div class="space-y-4 border-t border-subtle p-4 sm:p-5">
+              <div class="rounded-xl border border-subtle bg-raised p-3" data-ref-panel></div>
               <div class="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label class="label" for="tts-seed">Seed</label>
@@ -196,7 +196,7 @@ export async function renderTTS(root, ctx) {
     download.classList.remove("hidden");
     resultSubtitle.textContent = result.filename || "Generated speech";
     resultEl.innerHTML = `
-      <div class="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
+      <div class="rounded-2xl border border-subtle bg-raised p-5">
         <div class="mb-4 flex items-center gap-3">
           <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300">${icon("volume", "h-5 w-5")}</span>
           <div class="min-w-0">

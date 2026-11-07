@@ -222,7 +222,7 @@ export async function renderGenerate(root, ctx) {
       resultOpen.classList.add("hidden");
       $("[data-result-subtitle]").textContent = "Working…";
       result.innerHTML = `
-        <div class="flex min-h-[22rem] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-white/[0.08] bg-white/[0.015]">
+        <div class="flex min-h-[22rem] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-subtle bg-white/[0.015]">
           <div class="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-accent-400/20 bg-accent-500/10 text-accent-300">
             ${spinner("h-7 w-7")}
           </div>
@@ -252,7 +252,7 @@ export async function renderGenerate(root, ctx) {
 
     if (item.kind === "image") {
       result.innerHTML = `
-        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="group relative block overflow-hidden rounded-2xl border border-white/[0.06] bg-ink-950">
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="group relative block overflow-hidden rounded-2xl border border-subtle bg-ink-950">
           <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.filename || "Generated image")}" class="max-h-[72vh] w-full object-contain transition duration-300 group-hover:scale-[1.005]" />
           <span class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-gradient-to-t from-black/70 to-transparent p-3 text-[11px] text-white/70 opacity-0 transition group-hover:opacity-100">
             <span class="truncate">${escapeHtml(item.filename || "")}</span>
@@ -262,7 +262,7 @@ export async function renderGenerate(root, ctx) {
       `;
     } else if (item.kind === "audio") {
       result.innerHTML = `
-        <div class="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
+        <div class="rounded-2xl border border-subtle bg-raised p-5">
           <div class="mb-4 flex items-center gap-3">
             <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300">${icon("music", "h-5 w-5")}</span>
             <div class="min-w-0">
@@ -275,9 +275,9 @@ export async function renderGenerate(root, ctx) {
       `;
     } else {
       result.innerHTML = `
-        <div class="overflow-hidden rounded-2xl border border-white/[0.06] bg-ink-950">
+        <div class="overflow-hidden rounded-2xl border border-subtle bg-ink-950">
           <video class="max-h-[72vh] w-full" controls autoplay playsinline src="${escapeHtml(item.url)}"></video>
-          <div class="flex items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-3">
+          <div class="flex items-center justify-between gap-3 border-t border-subtle px-4 py-3">
             <p class="truncate text-xs text-slate-400">${escapeHtml(item.filename || "Generated video")}</p>
             <a class="btn-ghost btn-xs" href="${escapeHtml(item.url)}" download>${icon("download", "h-4 w-4")} Download</a>
           </div>
@@ -341,7 +341,7 @@ export async function renderGenerate(root, ctx) {
           </div>
           <span class="text-slate-500 transition group-open:rotate-180">${icon("chevron", "h-4 w-4")}</span>
         </summary>
-        <div class="space-y-3 border-t border-white/[0.06] p-4 sm:p-5">
+        <div class="space-y-3 border-t border-subtle p-4 sm:p-5">
           <div class="flex gap-2">
             <select class="select min-w-0 flex-1" data-preset-select aria-label="Saved preset">
               ${names.length ? names.map((name) => `<option value="${escapeHtml(name)}" ${name === selectedPreset ? "selected" : ""}>${escapeHtml(name)}${name === config.default_preset ? " (default)" : ""}</option>`).join("") : `<option value="">No presets yet</option>`}
@@ -352,7 +352,7 @@ export async function renderGenerate(root, ctx) {
             <button class="btn-ghost btn-xs" data-preset-default ${names.length ? "" : "disabled"}>${icon("check", "h-4 w-4")} Set default</button>
             <button class="btn-ghost btn-xs text-rose-300 hover:bg-rose-500/10" data-preset-delete ${names.length ? "" : "disabled"}>${icon("trash", "h-4 w-4")} Delete</button>
           </div>
-          <div class="flex gap-2 border-t border-white/[0.06] pt-3">
+          <div class="flex gap-2 border-t border-subtle pt-3">
             <input class="input min-w-0 flex-1" data-preset-name placeholder="New preset name, e.g. High quality" />
             <button class="btn-primary btn-xs shrink-0" data-preset-save>${icon("save", "h-4 w-4")} Save</button>
           </div>
@@ -544,12 +544,12 @@ export async function renderGenerate(root, ctx) {
            <span class="text-[11px]">No image selected</span>
          </div>`;
     return `
-      <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3" data-image-slot="${index}">
+      <div class="rounded-xl border border-subtle bg-raised p-3" data-image-slot="${index}">
         <div class="mb-2 flex items-center justify-between gap-2">
           <p class="truncate text-xs font-semibold text-slate-300">${escapeHtml(node.label)}</p>
           <span class="text-[10px] font-mono text-slate-600">${escapeHtml(node.id)}</span>
         </div>
-        <div class="mb-2 flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-white/[0.06] bg-ink-950/80">
+        <div class="mb-2 flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-subtle bg-ink-950/80">
           ${preview}
         </div>
         <div class="flex flex-wrap gap-1.5">
@@ -568,7 +568,7 @@ export async function renderGenerate(root, ctx) {
   function audioSlotHtml() {
     const ref = state.audio;
     return `
-      <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+      <div class="rounded-xl border border-subtle bg-raised p-3">
         ${ref ? `<audio class="mb-3 w-full" controls src="${escapeHtml(ref.previewUrl)}"></audio>` : ""}
         <div class="flex flex-wrap items-center gap-2">
           <label class="btn-secondary btn-xs cursor-pointer">
@@ -585,11 +585,11 @@ export async function renderGenerate(root, ctx) {
   function videoSlotHtml() {
     const ref = state.video;
     return `
-      <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+      <div class="rounded-xl border border-subtle bg-raised p-3">
         ${
           ref
             ? `<video class="mb-3 max-h-64 w-full rounded-lg bg-ink-950" controls src="${escapeHtml(ref.previewUrl)}"></video>`
-            : `<div class="mb-3 flex aspect-video items-center justify-center rounded-lg border border-dashed border-white/[0.08] bg-ink-950/60 text-slate-600">${icon("film", "h-7 w-7")}</div>`
+            : `<div class="mb-3 flex aspect-video items-center justify-center rounded-lg border border-dashed border-subtle bg-ink-950/60 text-slate-600">${icon("film", "h-7 w-7")}</div>`
         }
         <div class="flex flex-wrap items-center gap-2">
           <label class="btn-secondary btn-xs cursor-pointer">
@@ -655,7 +655,7 @@ export async function renderGenerate(root, ctx) {
         ${data.items
           .map(
             (item, itemIndex) => `
-            <button class="group overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.02] text-left transition hover:border-accent-400/40 hover:bg-white/[0.04]" data-gallery-item="${itemIndex}">
+            <button class="group overflow-hidden rounded-xl border border-subtle bg-raised text-left transition hover:border-accent-400/40 hover:bg-raised" data-gallery-item="${itemIndex}">
               <div class="aspect-square overflow-hidden bg-ink-950">
                 <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
               </div>
@@ -706,7 +706,7 @@ export async function renderGenerate(root, ctx) {
         ${data.items
           .map(
             (item, itemIndex) => `
-            <button class="group overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.02] text-left transition hover:border-accent-400/40 hover:bg-white/[0.04]" data-video-item="${itemIndex}">
+            <button class="group overflow-hidden rounded-xl border border-subtle bg-raised text-left transition hover:border-accent-400/40 hover:bg-raised" data-video-item="${itemIndex}">
               <video class="aspect-video w-full bg-ink-950 object-cover" muted preload="metadata" src="${escapeHtml(item.url)}"></video>
               <p class="truncate px-2.5 py-2 text-[11px] text-slate-400">${escapeHtml(item.filename)}</p>
             </button>
@@ -740,7 +740,7 @@ export async function renderGenerate(root, ctx) {
       size: "lg",
       content: `
         <div class="space-y-3">
-          <div class="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+          <div class="flex flex-wrap items-center gap-3 rounded-xl border border-subtle bg-raised p-3">
             <label class="flex items-center gap-2 text-xs text-slate-400">
               Brush
               <input type="range" min="1" max="48" value="8" class="range w-28" data-brush-size />
@@ -752,7 +752,7 @@ export async function renderGenerate(root, ctx) {
             </label>
             <button class="btn-ghost btn-xs ml-auto" data-sketch-clear>${icon("trash", "h-4 w-4")} Clear</button>
           </div>
-          <div class="flex items-center justify-center overflow-hidden rounded-xl border border-white/[0.06] bg-ink-950 p-2">
+          <div class="flex items-center justify-center overflow-hidden rounded-xl border border-subtle bg-ink-950 p-2">
             <canvas class="max-h-[62vh] max-w-full touch-none rounded-lg bg-white" data-sketch-canvas></canvas>
           </div>
         </div>
@@ -944,7 +944,7 @@ export async function renderGenerate(root, ctx) {
     if (widget === "checkbox") {
       return `
         <div class="field-row" data-control="${id}">
-          <label class="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+          <label class="flex items-center justify-between gap-3 rounded-xl border border-subtle bg-raised px-3 py-2.5">
             <span class="min-w-0"><span class="block text-sm font-medium text-slate-200">${label}</span><span class="mt-0.5 block font-mono text-[10px] text-slate-600">${escapeHtml(candidate.node)} · ${escapeHtml(candidate.input)}</span></span>
             <span class="switch"><input type="checkbox" data-binding="${id}" ${value ? "checked" : ""} /><span></span></span>
           </label>
@@ -998,7 +998,7 @@ export async function renderGenerate(root, ctx) {
       </div>
       ${
         hasSeed
-          ? `<label class="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+          ? `<label class="flex items-center justify-between gap-3 rounded-xl border border-subtle bg-raised px-3 py-2.5">
                <span><span class="block text-sm font-medium text-slate-200">Randomize seed</span><span class="text-[11px] text-slate-500">Use a fresh seed on every run</span></span>
                <span class="switch"><input type="checkbox" ${randomize ? "checked" : ""} data-randomize /><span></span></span>
              </label>`
@@ -1075,9 +1075,9 @@ export async function renderGenerate(root, ctx) {
             <button class="btn-ghost btn-xs" data-select-none>Select none</button>
             <span class="ml-auto text-[11px] text-slate-500">${rows.length} candidate input${rows.length === 1 ? "" : "s"}</span>
           </div>
-          <div class="overflow-x-auto rounded-xl border border-white/[0.06]">
+          <div class="overflow-x-auto rounded-xl border border-subtle">
             <table class="w-full min-w-[36rem] text-left text-sm">
-              <thead class="border-b border-white/[0.06] bg-white/[0.025] text-[10px] uppercase tracking-wider text-slate-500">
+              <thead class="border-b border-subtle bg-raised text-[10px] uppercase tracking-wider text-slate-500">
                 <tr>
                   <th class="w-14 px-3 py-2.5">Show</th>
                   <th class="w-20 px-3 py-2.5">Order</th>
@@ -1105,7 +1105,7 @@ export async function renderGenerate(root, ctx) {
             </table>
           </div>
 
-          <div class="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <div class="space-y-2 rounded-xl border border-subtle bg-raised p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p class="text-sm font-semibold text-slate-200">Workflow notes</p>

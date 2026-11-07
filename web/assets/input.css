@@ -6,21 +6,25 @@
   :root {
     color-scheme: dark;
     --ink-950: 7 10 18;
-    --ink-900: 11 16 28;
-    --ink-850: 16 23 38;
-    --ink-800: 21 29 46;
-    --ink-700: 30 41 59;
+    --ink-900: 18 26 42;
+    --ink-850: 26 36 55;
+    --ink-800: 36 48 70;
+    --ink-700: 50 65 90;
     --slate-50: 248 250 252;
     --slate-100: 241 245 249;
     --slate-200: 226 232 240;
     --slate-300: 203 213 225;
-    --slate-400: 148 163 184;
-    --slate-500: 100 116 139;
-    --slate-600: 71 85 105;
+    --slate-400: 156 171 191;
+    --slate-500: 124 140 162;
+    --slate-600: 110 126 148;
     --slate-700: 51 65 85;
     --slate-800: 30 41 59;
     --slate-900: 15 23 42;
     --slate-950: 2 6 23;
+    /* Semantic surface/border tokens: change these to adjust contrast. */
+    --line-subtle: rgb(255 255 255 / 0.08);
+    --line-strong: rgb(255 255 255 / 0.12);
+    --surface-raised: rgb(255 255 255 / 0.04);
   }
 
   html.light {
@@ -41,6 +45,9 @@
     --slate-800: 226 232 240;
     --slate-900: 241 245 249;
     --slate-950: 248 250 252;
+    --line-subtle: rgb(15 23 42 / 0.1);
+    --line-strong: rgb(15 23 42 / 0.14);
+    --surface-raised: rgb(15 23 42 / 0.04);
   }
 
   html {
@@ -84,15 +91,15 @@
 
 @layer components {
   .card {
-    @apply rounded-2xl border border-white/[0.06] bg-ink-900/80 shadow-2xl shadow-black/20 backdrop-blur;
+    @apply rounded-2xl border border-subtle bg-ink-900/95 shadow-2xl shadow-black/30 backdrop-blur;
   }
 
   .card-soft {
-    @apply rounded-xl border border-white/[0.05] bg-white/[0.025];
+    @apply rounded-xl border border-subtle bg-raised;
   }
 
   .card-header {
-    @apply flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3 sm:px-5;
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-subtle px-4 py-3 sm:px-5;
   }
 
   .card-title {
@@ -110,7 +117,7 @@
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-xl border border-white/10 bg-ink-950/70 px-3 py-2 text-sm text-slate-100 shadow-inner shadow-black/10 outline-none transition placeholder:text-slate-500 focus:border-accent-400/60 focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply w-full rounded-xl border border-white/15 bg-ink-950/80 px-3 py-2 text-sm text-slate-100 shadow-inner shadow-black/20 outline-none transition placeholder:text-slate-500 focus:border-accent-400/60 focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .select {
@@ -131,15 +138,15 @@
   }
 
   .btn-secondary {
-    @apply btn border border-white/10 bg-white/[0.06] text-slate-100 hover:border-white/20 hover:bg-white/[0.1];
+    @apply btn border border-white/15 bg-white/[0.08] text-slate-100 hover:border-white/25 hover:bg-white/[0.12];
   }
 
   .btn-ghost {
-    @apply btn text-slate-300 hover:bg-white/[0.06] hover:text-slate-100;
+    @apply btn text-slate-300 hover:bg-white/[0.08] hover:text-slate-100;
   }
 
   .btn-danger {
-    @apply btn border border-rose-500/25 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20;
+    @apply btn border border-rose-500/30 bg-rose-500/15 text-rose-300 hover:bg-rose-500/25;
   }
 
   .btn-xs {
@@ -147,11 +154,11 @@
   }
 
   .icon-btn {
-    @apply inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400/60;
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 transition hover:bg-white/[0.08] hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400/60;
   }
 
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-slate-300;
   }
 
   .chip-success {
@@ -167,15 +174,15 @@
   }
 
   .nav-link {
-    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition hover:bg-white/[0.05] hover:text-slate-100;
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/[0.07] hover:text-slate-100;
   }
 
   .nav-link-active {
-    @apply bg-accent-500/10 text-slate-50 shadow-inner shadow-accent-500/10 ring-1 ring-inset ring-accent-400/20;
+    @apply bg-accent-500/15 text-slate-50 shadow-inner shadow-accent-500/10 ring-1 ring-inset ring-accent-400/30;
   }
 
   .nav-icon {
-    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.03] text-slate-400 transition group-hover:text-slate-100;
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-slate-300 transition group-hover:text-slate-100;
   }
 
   .nav-link-active .nav-icon {
@@ -187,7 +194,7 @@
   }
 
   .switch {
-    @apply relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-white/10 bg-slate-700/70 transition;
+    @apply relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-white/15 bg-slate-700/80 transition;
   }
 
   .switch input {
@@ -195,7 +202,7 @@
   }
 
   .switch > span {
-    @apply pointer-events-none absolute inset-0 rounded-full bg-slate-700/70 transition;
+    @apply pointer-events-none absolute inset-0 rounded-full bg-slate-700/80 transition;
   }
 
   .switch > span::after {
@@ -226,7 +233,7 @@
   }
 
   .modal-panel {
-    @apply flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-ink-900 shadow-2xl shadow-black/50 sm:rounded-3xl;
+    @apply flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl border border-strong bg-ink-900 shadow-2xl shadow-black/50 sm:rounded-3xl;
   }
 
   .modal-panel-lg {
@@ -238,7 +245,7 @@
   }
 
   .toast {
-    @apply pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-ink-850/95 p-3.5 text-sm text-slate-200 shadow-2xl shadow-black/40 backdrop-blur;
+    @apply pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border border-strong bg-ink-850/95 p-3.5 text-sm text-slate-200 shadow-2xl shadow-black/40 backdrop-blur;
     animation: fade-up 180ms ease-out both;
   }
 
@@ -282,11 +289,11 @@
   }
 
   .prose-notes code {
-    @apply rounded bg-white/[0.08] px-1 py-0.5 font-mono text-[0.85em] text-slate-200;
+    @apply rounded bg-white/[0.1] px-1 py-0.5 font-mono text-[0.85em] text-slate-200;
   }
 
   .prose-notes pre {
-    @apply my-3 overflow-x-auto rounded-xl border border-white/10 bg-ink-950/80 p-3 font-mono text-xs;
+    @apply my-3 overflow-x-auto rounded-xl border border-strong bg-ink-950/90 p-3 font-mono text-xs;
   }
 
   .prose-notes pre code {
@@ -298,7 +305,7 @@
   }
 
   .prose-notes hr {
-    @apply my-4 border-white/10;
+    @apply my-4 border-subtle;
   }
 
   .skeleton {
@@ -308,15 +315,15 @@
   }
 
   .chat-bubble-user {
-    @apply ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-accent-500/20 px-4 py-2.5 text-sm leading-6 text-slate-100 ring-1 ring-inset ring-accent-400/20;
+    @apply ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-accent-500/25 px-4 py-2.5 text-sm leading-6 text-slate-100 ring-1 ring-inset ring-accent-400/30;
   }
 
   .chat-bubble-assistant {
-    @apply mr-auto max-w-[92%] rounded-2xl rounded-bl-md border border-white/[0.06] bg-white/[0.035] px-4 py-2.5 text-sm leading-6 text-slate-200;
+    @apply mr-auto max-w-[92%] rounded-2xl rounded-bl-md border border-subtle bg-raised px-4 py-2.5 text-sm leading-6 text-slate-200;
   }
 
   .gallery-tile {
-    @apply relative overflow-hidden rounded-2xl border border-white/[0.06] bg-ink-900 transition hover:border-accent-400/30 hover:shadow-glow;
+    @apply relative overflow-hidden rounded-2xl border border-subtle bg-ink-900 transition hover:border-accent-400/30 hover:shadow-glow;
   }
 }
 
@@ -376,34 +383,11 @@ html.light .skeleton {
 
 /* White-alpha surfaces become dark-alpha tints on a light background. */
 html.light [class~="bg-white/[0.015]"],
-html.light [class~="bg-white/[0.02]"],
-html.light [class~="bg-white/[0.025]"],
-html.light [class~="bg-white/[0.03]"],
-html.light [class~="bg-white/[0.035]"],
-html.light [class~="bg-white/[0.04]"],
 html.light [class~="bg-white/[0.05]"],
 html.light [class~="bg-white/[0.06]"] {
   background-color: rgb(15 23 42 / 0.04);
 }
 
-html.light [class~="bg-white/[0.08]"],
-html.light [class~="bg-white/[0.1]"] {
-  background-color: rgb(15 23 42 / 0.075);
-}
-
-html.light [class~="hover:bg-white/[0.04]"]:hover,
-html.light [class~="hover:bg-white/[0.05]"]:hover,
-html.light [class~="hover:bg-white/[0.06]"]:hover {
-  background-color: rgb(15 23 42 / 0.055);
-}
-
-html.light [class~="hover:bg-white/[0.1]"]:hover {
-  background-color: rgb(15 23 42 / 0.085);
-}
-
-html.light [class~="border-white/[0.05]"],
-html.light [class~="border-white/[0.06]"],
-html.light [class~="border-white/[0.08]"],
 html.light [class~="border-white/10"] {
   border-color: rgb(15 23 42 / 0.1);
 }
@@ -486,30 +470,10 @@ html.light .prose-notes a:hover {
 }
 
 /* Component classes compile their @apply colors, so override them directly. */
-html.light .card,
-html.light .card-soft,
-html.light .chat-bubble-assistant,
-html.light .gallery-tile,
-html.light .modal-panel,
-html.light .toast {
-  border-color: rgb(15 23 42 / 0.1);
-}
-
-html.light .card-soft,
-html.light .chat-bubble-assistant {
-  background-color: rgb(15 23 42 / 0.04);
-}
-
-html.light .card-header,
-html.light .prose-notes hr {
-  border-color: rgb(15 23 42 / 0.08);
-}
-
 html.light .input,
 html.light .select,
 html.light .textarea,
-html.light .switch,
-html.light .prose-notes pre {
+html.light .switch {
   border-color: rgb(15 23 42 / 0.12);
 }
 

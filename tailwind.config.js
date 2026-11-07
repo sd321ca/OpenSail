@@ -24,6 +24,13 @@ module.exports = {
           "monospace",
         ],
       },
+      borderColor: {
+        subtle: "var(--line-subtle)",
+        strong: "var(--line-strong)",
+      },
+      backgroundColor: {
+        raised: "var(--surface-raised)",
+      },
       colors: {
         ink: {
           950: "rgb(var(--ink-950) / <alpha-value>)",

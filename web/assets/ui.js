@@ -215,7 +215,7 @@ export function openModal({
   wrapper.className = "modal-backdrop";
   wrapper.innerHTML = `
     <div class="modal-panel ${size === "lg" ? "modal-panel-lg" : ""}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
-      <div class="flex items-start gap-3 border-b border-white/[0.06] px-4 py-4 sm:px-6">
+      <div class="flex items-start gap-3 border-b border-subtle px-4 py-4 sm:px-6">
         <div class="min-w-0 flex-1">
           <h2 class="text-base font-semibold tracking-tight text-slate-100">${escapeHtml(title)}</h2>
           ${subtitle ? `<p class="mt-0.5 text-xs leading-5 text-slate-400">${escapeHtml(subtitle)}</p>` : ""}
@@ -232,7 +232,7 @@ export function openModal({
 
   if (footer) {
     const foot = document.createElement("div");
-    foot.className = "flex flex-wrap items-center justify-end gap-2 border-t border-white/[0.06] bg-ink-900/95 px-4 py-3 sm:px-6";
+    foot.className = "flex flex-wrap items-center justify-end gap-2 border-t border-subtle bg-ink-900/95 px-4 py-3 sm:px-6";
     if (footer instanceof Node) foot.appendChild(footer);
     else foot.innerHTML = footer;
     panel.appendChild(foot);
@@ -325,7 +325,7 @@ export function debounce(fn, wait = 250) {
 export function emptyState(title, message, iconName = "info") {
   return `
     <div class="flex flex-col items-center justify-center gap-3 px-6 py-12 text-center">
-      <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/[0.06] bg-white/[0.03] text-slate-500">
+      <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-subtle bg-raised text-slate-500">
         ${icon(iconName, "h-6 w-6")}
       </div>
       <div>

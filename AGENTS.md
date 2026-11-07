@@ -12,7 +12,7 @@ Applies to: `web/**`, `tailwind.config.js`, `package.json`.
 
 The dashboard is a static single-page app in `web/` using Tailwind CSS. UI changes go in `web/assets/pages/*.js`; shared helpers are in `web/assets/ui.js` and API/SSE plumbing in `web/assets/api.js`. After changing classes or markup, rebuild the committed stylesheet with `npm run build:css` (Tailwind scans `web/**/*.{html,js}`). The generated `web/assets/styles.css` is committed; `node_modules/` is not.
 
-The palette is driven by CSS variables in `web/assets/input.css`: `:root` holds the dark theme and `html.light` the light theme. Prefer the `ink-*` / `slate-*` utilities so both themes follow automatically; add explicit `html.light` overrides when introducing a fixed colour or white-alpha surface.
+The palette is driven by CSS variables in `web/assets/input.css`: `:root` holds the dark theme and `html.light` the light theme. Prefer the `ink-*` / `slate-*` utilities so both themes follow automatically; add explicit `html.light` overrides when introducing a fixed colour or white-alpha surface. For repeated surfaces and separators use the semantic `bg-raised`, `border-subtle`, and `border-strong` utilities; their dark/light values live in `--surface-raised` and `--line-*`, so contrast changes happen in one place.
 
 ## Machine-specific config files
 
