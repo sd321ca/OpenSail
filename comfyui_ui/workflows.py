@@ -24,7 +24,11 @@ from .config import (
     VIDEO_OUTPUT_NODE_TYPES,
     WORKFLOWS_DIR,
 )
-from .fields import get_fields, get_saved_fields, split_binding_entry
+from .fields import (
+    get_fields,
+    get_saved_fields,
+    parse_binding_entry,
+)
 
 
 def list_workflows() -> list:
@@ -264,9 +268,9 @@ def list_node_candidates(workflow_name: str) -> list:
 def get_selected_bindings(workflow_name: str) -> list:
     """Return the selected ``node_id|input_key`` bindings for a workflow.
 
-    Entries can be plain binding-ID strings or objects with an optional
-    ``name`` display label. Stale bindings are ignored. A workflow without a
-    saved entry selects every editable node input it contains.
+    Entries are parsed from ``node_id|input_key|visible|display_name``; hidden
+    entries are ignored. Stale bindings are ignored. A workflow without a saved
+    entry selects every editable node input it contains.
     """
     if not workflow_name:
         return []
@@ -279,22 +283,22 @@ def get_selected_bindings(workflow_name: str) -> list:
     available = {candidate["id"] for candidate in candidates}
     selected = []
     for entry in saved:
-        binding_id, _name = split_binding_entry(entry)
-        if binding_id in available:
+        binding_id, _name, visible = parse_binding_entry(entry)
+        if visible and binding_id in available:
             selected.append(binding_id)
     return list(dict.fromkeys(selected))
 
 
 def get_display_names(workflow_name: str) -> dict:
-    """Return the saved display names for a workflow's selected bindings."""
+    """Return saved display names, including aliases for hidden bindings."""
     if not workflow_name:
         return {}
 
     names = {}
     for entry in get_saved_fields(workflow_name) or []:
-        binding_id, name = split_binding_entry(entry)
-        if binding_id and isinstance(name, str) and name.strip():
-            names[binding_id] = name.strip()
+        binding_id, name, _visible = parse_binding_entry(entry)
+        if binding_id and name:
+            names[binding_id] = name
     return names
 
 

@@ -22,6 +22,17 @@ function workflowUrl(name) {
   return `/api/workflows/${encodeURIComponent(name)}`;
 }
 
+function candidateValues(config, values) {
+  // Keep values for every candidate, including hidden ones. Hiding a control
+  // should not reset its last value back to the workflow JSON default.
+  const candidates = new Set(
+    (config?.candidates || []).map((candidate) => candidate.id),
+  );
+  return Object.fromEntries(
+    Object.entries(values || {}).filter(([id]) => candidates.has(id)),
+  );
+}
+
 function selectedValues(config, values) {
   const selected = new Set(config?.selected || []);
   return Object.fromEntries(
@@ -1202,7 +1213,22 @@ export async function renderGenerate(root, ctx) {
         const updated = await api(`${workflowUrl(config.name)}/fields`, {
           method: "PUT",
           body: {
-            bindings: ordered.map((row) => ({ id: row.candidate.id, name: row.name.trim() })),
+            bindings: [
+              ...ordered.map((row) => ({
+                id: row.candidate.id,
+                name: row.name.trim(),
+                visible: true,
+              })),
+              // Hidden aliases stay in the same list so showing the input
+              // again restores its display name.
+              ...rows
+                .filter((row) => !row.show && row.name.trim())
+                .map((row) => ({
+                  id: row.candidate.id,
+                  name: row.name.trim(),
+                  visible: false,
+                })),
+            ],
           },
         });
         modal.close();
@@ -1285,7 +1311,7 @@ export async function renderGenerate(root, ctx) {
 
     const payload = {
       workflow: config.name,
-      values: selectedValues(config, state.values),
+      values: candidateValues(config, state.values),
       randomize_seed: randomize,
       images: config.image_nodes.map((_node, index) => refPayload(state.images[index])),
       audio: refPayload(state.audio),

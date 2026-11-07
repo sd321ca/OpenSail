@@ -363,6 +363,7 @@ def _synthesize_reply(text: str, voice: str | None) -> str | None:
 class FieldEntry(BaseModel):
     id: str
     name: str = ""
+    visible: bool = True
 
 
 class FieldSelection(BaseModel):
@@ -617,10 +618,16 @@ def put_workflow_fields(workflow_name: str, body: FieldSelection) -> dict:
     entries = []
     seen = set()
     for entry in body.bindings:
-        if entry.id in valid and entry.id not in seen:
-            seen.add(entry.id)
-            clean_name = entry.name.strip()
-            entries.append(f"{entry.id}|{clean_name}" if clean_name else entry.id)
+        if entry.id not in valid or entry.id in seen:
+            continue
+        seen.add(entry.id)
+        clean_name = entry.name.strip()
+        if not entry.visible and not clean_name:
+            # A hidden input with no alias carries no state worth storing.
+            continue
+        visible = "true" if entry.visible else "false"
+        entries.append(f"{entry.id}|{visible}|{clean_name}")
+
     try:
         save_workflow_fields(name, entries)
     except OSError as exc:

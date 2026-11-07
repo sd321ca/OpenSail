@@ -284,10 +284,11 @@ Title hints and node types only decide which widget and options are used for a
 candidate; they do not hide inputs from the picker.
 
 Which node inputs are shown is saved per workflow in
-`configs/workflow_fields.json` as `node_id|input_key` bindings. The order of
-that list is the order of the controls in the Generate page. A workflow with no
-entry shows every editable node input; use the **Choose inputs…** popup in the
-Generate page to choose a subset, reorder it and save it. The file can also be
+`configs/workflow_fields.json` as `node_id|input_key|visible|display_name`
+entries. The order of that list is the order of the controls in the Generate
+page. A workflow with no entry shows every editable node input; use the
+**Choose inputs…** popup in the Generate page to choose a subset, reorder it and
+save it. The file can also be
 edited or reordered by hand.
 
 ## Configuration
@@ -467,18 +468,19 @@ get a generic textbox / number / checkbox based on their value type.
 ### `workflow_fields.json`
 
 This file stores the per-workflow node selections shown in the Generate page.
-`workflow_fields` maps a workflow filename to the list of node bindings shown
-there. A binding is `node_id|input_key`, optionally followed by a third
-`|display_name` segment used as the control label:
+`workflow_fields` maps a workflow filename to the list of node bindings. Every
+entry uses `node_id|input_key|visible|display_name`, where `visible` is `true`
+or `false` and the display name may be empty (keep the trailing `|`):
 
 ```json
 "workflow_fields": {
   "Image Gen (Moss) - Text Input.json": [
-    "18:17|value",
-    "18:5|text|Negative prompt",
-    "18:7|seed",
-    "19|aspect_ratio",
-    "19|megapixels"
+    "18:17|value|true|Prompt",
+    "18:5|text|true|Negative prompt",
+    "18:7|seed|true|Seed",
+    "19|aspect_ratio|true|",
+    "19|megapixels|true|",
+    "18:7|cfg|false|Cfg"
   ]
 }
 ```
@@ -505,6 +507,9 @@ the table is renumbered to match what was stored.
   preserved.
 - Hiding a node control only affects the UI. The workflow still keeps that
   node's stored value when generating.
+- The `visible` flag is stored for every binding. Hidden bindings with an alias
+  keep it in the same list, so re-showing an input restores its display name
+  without retyping it.
 
 ### `workflow_presets.json`
 

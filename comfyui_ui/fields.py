@@ -115,61 +115,62 @@ def resolve_choices(field: dict) -> list:
     return _load_choices(source)
 
 
-def split_binding_entry(entry):
-    """Return ``(binding_id, display_name)`` for a saved entry.
+def parse_binding_entry(entry) -> tuple[str | None, str | None, bool]:
+    """Return ``(binding_id, display_name, visible)`` for a saved entry.
 
-    String entries use ``node_id|input_key`` or
-    ``node_id|input_key|display_name``. Object entries with ``id`` and an
-    optional ``name`` are also accepted for backwards compatibility.
+    Entries use ``node_id|input_key|visible|display_name``. The alias may be
+    empty but the trailing separator is kept, so every entry has the same
+    shape. ``visible`` is ``true`` or ``false``.
     """
-    if isinstance(entry, str):
-        parts = entry.split("|", 2)
-        if len(parts) < 2:
-            return None, None
-        name = parts[2] if len(parts) > 2 else None
-        return f"{parts[0]}|{parts[1]}", name
-    if isinstance(entry, dict):
-        binding_id = entry.get("id")
-        if not isinstance(binding_id, str):
-            return None, None
-        name = entry.get("name")
-        return binding_id, name if isinstance(name, str) else None
-    return None, None
+    if not isinstance(entry, str):
+        return None, None, True
+    parts = entry.split("|", 3)
+    if len(parts) < 4:
+        return None, None, True
+    binding_id = f"{parts[0]}|{parts[1]}"
+    visible = parts[2].strip().lower() != "false"
+    name = parts[3].strip() or None
+    return binding_id, name, visible
 
 
 def get_saved_fields(workflow_name: str) -> list | None:
     """Return the saved node-binding list for a workflow, or None.
 
-    Entries are ``node_id|input_key`` strings, optionally with a
-    ``|display_name`` suffix; use ``split_binding_entry`` to read them.
-    ``None`` means the workflow has no entry in ``workflow_fields`` yet, in
-    which case the UI shows every editable node input. An empty list is a saved
-    selection that hides every node control.
+    Entries use ``node_id|input_key|visible|display_name``; use
+    ``parse_binding_entry`` to read them. ``None`` means the workflow has no
+    entry in ``workflow_fields`` yet, in which case the UI shows every editable
+    node input. An empty list is a saved selection that hides every node
+    control.
     """
     saved = _WORKFLOW_FIELDS.get(workflow_name)
     return list(saved) if isinstance(saved, list) else None
 
 
 def save_workflow_fields(workflow_name: str, entries: list) -> None:
-    """Persist a workflow's selected node bindings.
+    """Persist a workflow's selected bindings and hidden aliases.
 
-    Entries are written as strings: ``node_id|input_key`` when unnamed, or
-    ``node_id|input_key|display_name`` when named. They are stored under the
-    top-level ``workflow_fields`` mapping in ``configs/workflow_fields.json``
-    in the given order. The file is re-read before writing so manual edits made
-    while the app is running are preserved, then written atomically.
+    Every entry is written as ``node_id|input_key|visible|display_name``, where
+    ``visible`` is ``true`` or ``false`` and the alias may be empty. Hidden
+    entries without an alias are omitted. They are stored under the top-level
+    ``workflow_fields`` mapping in ``configs/workflow_fields.json`` in the given
+    order. The file is re-read before writing so manual edits made while the app
+    is running are preserved, then written atomically.
     """
     global _WORKFLOW_FIELDS
 
     ordered = []
     seen = set()
     for entry in entries or []:
-        binding_id, name = split_binding_entry(entry)
+        binding_id, name, visible = parse_binding_entry(entry)
         if not binding_id or binding_id in seen:
             continue
         seen.add(binding_id)
-        name = name.strip() if isinstance(name, str) else ""
-        ordered.append(f"{binding_id}|{name}" if name else binding_id)
+        name = name or ""
+        if not visible and not name:
+            continue
+        ordered.append(
+            f"{binding_id}|{'true' if visible else 'false'}|{name}"
+        )
 
     config = load_workflow_fields_config()
     workflow_fields = config.get("workflow_fields")
