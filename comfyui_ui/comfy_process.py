@@ -18,6 +18,7 @@ from .config import (
     COMFY_DIR,
     COMFY_MAIN,
     COMFY_PYTHON,
+    COMFY_SHOW_CONSOLE,
     COMFY_START_ARGS,
     COMFY_START_TIMEOUT,
     COMFY_URL,
@@ -145,19 +146,27 @@ class ComfyUIProcess:
 
         cmd = [COMFY_PYTHON, "-s", COMFY_MAIN, *COMFY_START_ARGS]
         cwd = COMFY_DIR or os.path.dirname(COMFY_MAIN) or None
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        self._log_path = os.path.join(
-            tempfile.gettempdir(), "opensail_comfyui.log"
-        )
-        self._log_file = open(
-            self._log_path, "w", encoding="utf-8", errors="replace"
-        )
+        show_console = os.name == "nt" and COMFY_SHOW_CONSOLE
+        if show_console:
+            creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            stdout = None
+            stderr = None
+        else:
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            self._log_path = os.path.join(
+                tempfile.gettempdir(), "opensail_comfyui.log"
+            )
+            self._log_file = open(
+                self._log_path, "w", encoding="utf-8", errors="replace"
+            )
+            stdout = self._log_file
+            stderr = subprocess.STDOUT
         try:
             self._process = subprocess.Popen(
                 cmd,
                 cwd=cwd,
-                stdout=self._log_file,
-                stderr=subprocess.STDOUT,
+                stdout=stdout,
+                stderr=stderr,
                 creationflags=creationflags,
             )
         except OSError as exc:

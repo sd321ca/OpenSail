@@ -154,6 +154,12 @@ if isinstance(_configured_args, str):
     _configured_args = shlex.split(_configured_args)
 COMFY_START_ARGS = [str(arg) for arg in _configured_args]
 COMFY_START_TIMEOUT = float(CONFIG.get("comfy_start_timeout", 300))
+# Keep the process running when OpenSail exits. It will then appear as an
+# externally started ComfyUI on the next launch (and won't be stoppable here).
+COMFY_STOP_ON_EXIT = bool(CONFIG.get("comfy_stop_on_exit", True))
+# Show ComfyUI in its own console window (Windows). When false, output is
+# captured in a log file instead.
+COMFY_SHOW_CONSOLE = bool(CONFIG.get("comfy_show_console", False))
 
 # The HTTP server.
 SERVER_NAME = CONFIG["server_name"]

@@ -116,8 +116,15 @@ installs, and `comfy_start_args` is a JSON list of extra arguments.
 
 If ComfyUI is already running, Start is disabled and no second copy is
 launched. Stop only terminates a process that OpenSail started; externally
-started instances are left alone. A managed process is stopped when OpenSail
-exits.
+started instances are left alone.
+
+By default, a managed process is stopped when OpenSail exits. Set
+`comfy_stop_on_exit` to `false` to leave it running; on the next launch it will
+appear as an externally started instance.
+
+With `comfy_show_console` enabled on Windows, ComfyUI opens in its own console
+window. Otherwise it runs headless and its output is captured in
+`%TEMP%\opensail_comfyui.log`.
 
 ## Authentication
 
@@ -319,6 +326,8 @@ General settings:
 - `comfy_main` — optional `main.py` override for non-portable installs
 - `comfy_start_args` — JSON list of arguments appended to `python -s main.py`
 - `comfy_start_timeout` — seconds to wait for ComfyUI to answer after Start
+- `comfy_stop_on_exit` — stop a managed ComfyUI when OpenSail exits (default true)
+- `comfy_show_console` — show ComfyUI in its own console window on Windows (default false)
 - `server_name` — interface to bind (`0.0.0.0` exposes the UI on the LAN)
 - `server_port` — port to serve on
 - `server_public_access` — kept for compatibility; public tunnels are not used by the built-in server

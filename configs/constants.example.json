@@ -3,8 +3,15 @@
   "comfy_dir": "",
   "comfy_python": "",
   "comfy_main": "",
-  "comfy_start_args": ["--listen", "0.0.0.0", "--enable-cors-header", "--use-ck-attention"],
+  "comfy_start_args": [
+    "--listen",
+    "0.0.0.0",
+    "--enable-cors-header",
+    "--use-ck-attention"
+  ],
   "comfy_start_timeout": 300,
+  "comfy_stop_on_exit": true,
+  "comfy_show_console": false,
   "server_name": "0.0.0.0",
   "server_port": 7860,
   "server_public_access": false,

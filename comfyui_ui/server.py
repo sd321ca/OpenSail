@@ -49,6 +49,7 @@ from .config import (
     AUDIOCPP_VOICE_DIR,
     BASE_DIR,
     CHAT_SYSTEM_PROMPT,
+    COMFY_STOP_ON_EXIT,
     COMFY_URL,
     DEFAULT_WORKFLOW,
     KIND_AUDIO,
@@ -446,9 +447,14 @@ class TTSBody(BaseModel):
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     yield
-    for manager in (chat_model, audio_model, comfy_process):
+    for manager in (chat_model, audio_model):
         try:
             manager.unload()
+        except Exception:  # noqa: BLE001
+            pass
+    if COMFY_STOP_ON_EXIT:
+        try:
+            comfy_process.unload()
         except Exception:  # noqa: BLE001
             pass
 
