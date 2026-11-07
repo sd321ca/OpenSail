@@ -72,6 +72,9 @@ export async function renderGenerate(root, ctx) {
     result: null,
     error: "",
     controller: null,
+    startedAt: 0,
+    elapsedMs: 0,
+    timer: null,
   };
 
   root.innerHTML = `
@@ -136,7 +139,10 @@ export async function renderGenerate(root, ctx) {
             <div class="hidden space-y-2" data-progress-wrap>
               <div class="flex items-center justify-between gap-3 text-xs">
                 <span class="truncate text-slate-400" data-progress-label>Preparing…</span>
-                <span class="shrink-0 font-mono text-slate-500" data-progress-percent></span>
+                <span class="flex shrink-0 items-center gap-2 font-mono text-slate-500">
+                  <span data-progress-time></span>
+                  <span data-progress-percent></span>
+                </span>
               </div>
               <div class="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
                 <div class="h-full w-0 rounded-full bg-gradient-to-r from-accent-500 to-sky-400 transition-all duration-300" data-progress-bar></div>
@@ -156,7 +162,10 @@ export async function renderGenerate(root, ctx) {
                 <p class="card-subtitle" data-result-subtitle>Nothing generated yet.</p>
               </div>
             </div>
-            <a class="btn-ghost btn-xs hidden" data-result-open target="_blank" rel="noopener noreferrer">${icon("external", "h-4 w-4")} Open</a>
+            <div class="flex items-center gap-2">
+              <span class="chip hidden" data-result-time title="Generation time"></span>
+              <a class="btn-ghost btn-xs hidden" data-result-open target="_blank" rel="noopener noreferrer">${icon("external", "h-4 w-4")} Open</a>
+            </div>
           </div>
           <div class="p-4 sm:p-5" data-result></div>
         </section>
@@ -177,6 +186,8 @@ export async function renderGenerate(root, ctx) {
   const progressBar = $("[data-progress-bar]");
   const progressLabel = $("[data-progress-label]");
   const progressPercent = $("[data-progress-percent]");
+  const progressTime = $("[data-progress-time]");
+  const resultTime = $("[data-result-time]");
   const resultOpen = $("[data-result-open]");
 
   if (workflowSelect) workflowSelect.value = workflow || "";
@@ -206,6 +217,55 @@ export async function renderGenerate(root, ctx) {
     progressWrap.classList.add("hidden");
     progressBar.style.width = "0%";
     progressPercent.textContent = "";
+    progressTime.textContent = "";
+  }
+
+  function formatDuration(ms) {
+    const seconds = Math.max(0, ms) / 1000;
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainder = Math.floor(seconds % 60);
+    return `${minutes}m ${String(remainder).padStart(2, "0")}s`;
+  }
+
+  function setResultTime(ms) {
+    if (!resultTime) return;
+    if (!ms) {
+      resultTime.classList.add("hidden");
+      resultTime.textContent = "";
+      return;
+    }
+    const text = formatDuration(ms);
+    resultTime.innerHTML = `${icon("clock", "h-3 w-3")} ${text}`;
+    resultTime.title = `Generation time: ${text}`;
+    resultTime.classList.remove("hidden");
+  }
+
+  function startTimer() {
+    if (state.timer) clearInterval(state.timer);
+    state.startedAt = performance.now();
+    state.elapsedMs = 0;
+    progressTime.textContent = "0.0s";
+    state.timer = setInterval(() => {
+      if (!state.startedAt) return;
+      progressTime.textContent = formatDuration(
+        performance.now() - state.startedAt,
+      );
+    }, 200);
+  }
+
+  function stopTimer() {
+    if (state.timer) {
+      clearInterval(state.timer);
+      state.timer = null;
+    }
+    if (state.startedAt) {
+      state.elapsedMs = performance.now() - state.startedAt;
+      state.startedAt = 0;
+    }
+    if (state.elapsedMs) {
+      progressTime.textContent = formatDuration(state.elapsedMs);
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -215,7 +275,10 @@ export async function renderGenerate(root, ctx) {
   function renderResult() {
     if (state.error) {
       resultOpen.classList.add("hidden");
-      $("[data-result-subtitle]").textContent = "Generation failed.";
+      setResultTime(0);
+      $("[data-result-subtitle]").textContent = state.elapsedMs
+        ? `${state.error === "Generation cancelled." ? "Cancelled" : "Generation failed"} after ${formatDuration(state.elapsedMs)}.`
+        : "Generation failed.";
       result.innerHTML = `
         <div class="rounded-2xl border border-rose-400/20 bg-rose-400/[0.07] p-5">
           <div class="flex items-start gap-3">
@@ -231,6 +294,7 @@ export async function renderGenerate(root, ctx) {
     }
     if (state.running) {
       resultOpen.classList.add("hidden");
+      setResultTime(0);
       $("[data-result-subtitle]").textContent = "Working…";
       result.innerHTML = `
         <div class="flex min-h-[22rem] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-subtle bg-white/[0.015]">
@@ -247,6 +311,7 @@ export async function renderGenerate(root, ctx) {
     }
     if (!state.result) {
       resultOpen.classList.add("hidden");
+      setResultTime(0);
       $("[data-result-subtitle]").textContent = "Nothing generated yet.";
       result.innerHTML = emptyState(
         "Ready when you are",
@@ -257,6 +322,7 @@ export async function renderGenerate(root, ctx) {
     }
 
     const item = state.result;
+    setResultTime(state.elapsedMs);
     $("[data-result-subtitle]").textContent = item.filename || "Generated result";
     resultOpen.href = item.url;
     resultOpen.classList.remove("hidden");
@@ -1261,6 +1327,7 @@ export async function renderGenerate(root, ctx) {
       state.video = null;
       state.result = null;
       state.error = "";
+      state.elapsedMs = 0;
       hideProgress();
     }
 
@@ -1304,9 +1371,11 @@ export async function renderGenerate(root, ctx) {
     state.running = true;
     state.result = null;
     state.error = "";
+    state.elapsedMs = 0;
     state.controller = new AbortController();
     renderButtons();
     renderResult();
+    startTimer();
     updateProgress(0, "Preparing…", true);
 
     const payload = {
@@ -1334,17 +1403,20 @@ export async function renderGenerate(root, ctx) {
           } else if (event.type === "error") {
             state.error = event.message || "Generation failed.";
             state.running = false;
+            stopTimer();
             renderButtons();
             renderResult();
             toast(state.error, "error");
           } else if (event.type === "cancelled") {
             state.error = "Generation cancelled.";
             state.running = false;
+            stopTimer();
             renderButtons();
             renderResult();
             toast("Generation cancelled.", "warning");
           } else if (event.type === "done") {
             state.running = false;
+            stopTimer();
             renderButtons();
             renderResult();
             updateProgress(1, "Done.", false);
@@ -1356,10 +1428,14 @@ export async function renderGenerate(root, ctx) {
     } catch (error) {
       if (error.name !== "AbortError") {
         state.error = error.message || "Generation failed.";
+        state.running = false;
+        stopTimer();
+        renderButtons();
         renderResult();
         toast(state.error, "error");
       }
     } finally {
+      if (state.startedAt) stopTimer();
       state.running = false;
       state.controller = null;
       renderButtons();
@@ -1404,6 +1480,8 @@ export async function renderGenerate(root, ctx) {
   if (workflow) await loadWorkflow(workflow);
 
   return () => {
+    if (state.timer) clearInterval(state.timer);
+    state.timer = null;
     if (state.running) {
       state.controller?.abort();
       api("/api/generate/cancel", { method: "POST" }).catch(() => {});
