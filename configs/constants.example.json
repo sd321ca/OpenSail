@@ -1,5 +1,10 @@
 {
   "comfy_url": "http://127.0.0.1:8188",
+  "comfy_dir": "",
+  "comfy_python": "",
+  "comfy_main": "",
+  "comfy_start_args": ["--listen", "0.0.0.0", "--enable-cors-header", "--use-ck-attention"],
+  "comfy_start_timeout": 300,
   "server_name": "0.0.0.0",
   "server_port": 7860,
   "server_public_access": false,

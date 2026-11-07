@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 
 from dotenv import load_dotenv
@@ -127,6 +128,33 @@ CONFIG = load_config()
 # Workflow selected by default in the UI.
 DEFAULT_WORKFLOW = CONFIG["default_workflow"]
 COMFY_URL = CONFIG["comfy_url"]
+
+
+# --- Managed ComfyUI process ----------------------------------------------
+def _config_path(value: str) -> str:
+    """Expand ``~`` and resolve relative paths against the project root."""
+    path = os.path.expanduser(str(value or "").strip())
+    if path and not os.path.isabs(path):
+        path = os.path.join(BASE_DIR, path)
+    return path
+
+
+# Root of a ComfyUI portable install (the folder containing ``python_embeded``
+# and ``ComfyUI``). Leave empty to manage/start ComfyUI yourself.
+COMFY_DIR = _config_path(CONFIG.get("comfy_dir", ""))
+# Optional explicit overrides for non-portable installs.
+COMFY_PYTHON = _config_path(CONFIG.get("comfy_python", ""))
+if not COMFY_PYTHON and COMFY_DIR:
+    COMFY_PYTHON = os.path.join(COMFY_DIR, "python_embeded", "python.exe")
+COMFY_MAIN = _config_path(CONFIG.get("comfy_main", ""))
+if not COMFY_MAIN and COMFY_DIR:
+    COMFY_MAIN = os.path.join(COMFY_DIR, "ComfyUI", "main.py")
+_configured_args = CONFIG.get("comfy_start_args", ["--listen", "0.0.0.0"])
+if isinstance(_configured_args, str):
+    _configured_args = shlex.split(_configured_args)
+COMFY_START_ARGS = [str(arg) for arg in _configured_args]
+COMFY_START_TIMEOUT = float(CONFIG.get("comfy_start_timeout", 300))
+
 # The HTTP server.
 SERVER_NAME = CONFIG["server_name"]
 SERVER_PORT = CONFIG["server_port"]

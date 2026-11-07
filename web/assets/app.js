@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { icon, spinner, toast } from "./ui.js";
+import { icon, setButtonBusy, spinner, toast } from "./ui.js";
 import { renderGenerate } from "./pages/generate.js";
 import { renderChat } from "./pages/chat.js";
 import { renderTTS } from "./pages/tts.js";
@@ -60,6 +60,7 @@ const state = {
   boot: null,
   page: null,
   cleanup: null,
+  comfyBusy: false,
 };
 
 /* ------------------------------------------------------------------ */
@@ -124,7 +125,6 @@ const ctx = {
   navigate: (page) => {
     window.location.hash = `#${page}`;
   },
-  refresh: () => refreshPage(),
 };
 
 /* ------------------------------------------------------------------ */
@@ -209,33 +209,52 @@ async function navigate() {
   }
 }
 
-async function refreshPage() {
-  try {
-    state.boot = await api("/api/bootstrap");
-    applyBootStatus();
-    state.cleanup?.();
-    state.cleanup = null;
-    state.page = null;
-    await navigate();
-    toast("Refreshed", "success", 1800);
-  } catch (error) {
-    toast(error.message || "Could not refresh.", "error");
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /* Connection status                                                   */
 /* ------------------------------------------------------------------ */
+
+function updateComfyControls({ connected, managed, configured }) {
+  const start = document.getElementById("comfy-start");
+  const stop = document.getElementById("comfy-stop");
+  const label = document.getElementById("comfy-state");
+  if (!start || !stop || !label) return;
+
+  start.disabled = state.comfyBusy || connected || managed || !configured;
+  start.title = !configured
+    ? "Set comfy_dir in configs/constants.json to start ComfyUI"
+    : connected || managed
+      ? "ComfyUI is already running"
+      : "Start ComfyUI";
+
+  stop.disabled = state.comfyBusy || !managed;
+  stop.title = managed
+    ? "Stop the ComfyUI process started by OpenSail"
+    : "ComfyUI was not started by OpenSail";
+
+  label.textContent = connected
+    ? managed
+      ? "Managed by OpenSail"
+      : "Running outside OpenSail"
+    : managed
+      ? "Starting…"
+      : configured
+        ? "Not running"
+        : "Not configured";
+  label.className = `mt-1 text-[11px] ${
+    connected ? "text-emerald-300" : "text-slate-500"
+  }`;
+}
 
 function applyBootStatus() {
   const boot = state.boot;
   if (!boot) return;
   document.getElementById("comfy-url").textContent =
     boot.comfy_url || "Unknown";
-  const link = document.getElementById("comfy-link");
-  link.href = boot.comfy_url || "#";
-  link.classList.toggle("pointer-events-none", !boot.comfy_url);
-  link.classList.toggle("opacity-40", !boot.comfy_url);
+  updateComfyControls({
+    connected: Boolean(boot.comfy_managed),
+    managed: Boolean(boot.comfy_managed),
+    configured: Boolean(boot.comfy_configured),
+  });
 }
 
 async function refreshConnectionStatus() {
@@ -244,14 +263,69 @@ async function refreshConnectionStatus() {
   try {
     const status = await api("/api/status");
     const connected = Boolean(status.comfy);
-    dot.className = `h-1.5 w-1.5 rounded-full ${connected ? "bg-emerald-400" : "bg-rose-400"}`;
-    chip.className = `chip hidden sm:inline-flex ${connected ? "chip-success" : "chip-danger"}`;
-    chip.innerHTML = `<span class="h-1.5 w-1.5 rounded-full ${connected ? "bg-emerald-400" : "bg-rose-400"}"></span><span>${connected ? "ComfyUI connected" : "ComfyUI offline"}</span>`;
+    const managed = Boolean(status.comfy_managed);
+    const color = connected
+      ? "bg-emerald-400"
+      : managed
+        ? "bg-amber-400"
+        : "bg-rose-400";
+    const label = connected
+      ? "ComfyUI connected"
+      : managed
+        ? "ComfyUI starting"
+        : "ComfyUI offline";
+    dot.className = `h-1.5 w-1.5 rounded-full ${color}`;
+    chip.className = `chip hidden sm:inline-flex ${
+      connected ? "chip-success" : managed ? "chip-warn" : "chip-danger"
+    }`;
+    chip.innerHTML = `<span class="h-1.5 w-1.5 rounded-full ${color}"></span><span>${label}</span>`;
+    updateComfyControls({
+      connected,
+      managed,
+      configured: Boolean(status.comfy_configured),
+    });
   } catch (_error) {
     dot.className = "h-1.5 w-1.5 rounded-full bg-rose-400";
     chip.className = "chip chip-danger hidden sm:inline-flex";
     chip.innerHTML =
       '<span class="h-1.5 w-1.5 rounded-full bg-rose-400"></span><span>Server unreachable</span>';
+    updateComfyControls({
+      connected: false,
+      managed: false,
+      configured: Boolean(state.boot?.comfy_configured),
+    });
+  }
+}
+
+async function startComfy() {
+  const button = document.getElementById("comfy-start");
+  state.comfyBusy = true;
+  setButtonBusy(button, true, "Starting…");
+  try {
+    const result = await api("/api/comfy/start", { method: "POST" });
+    toast(result.status || "ComfyUI started.", "success");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    state.comfyBusy = false;
+    setButtonBusy(button, false);
+    await refreshConnectionStatus();
+  }
+}
+
+async function stopComfy() {
+  const button = document.getElementById("comfy-stop");
+  state.comfyBusy = true;
+  setButtonBusy(button, true, "Stopping…");
+  try {
+    const result = await api("/api/comfy/stop", { method: "POST" });
+    toast(result.status || "ComfyUI stopped.", "success");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    state.comfyBusy = false;
+    setButtonBusy(button, false);
+    await refreshConnectionStatus();
   }
 }
 
@@ -275,11 +349,11 @@ async function boot() {
     .getElementById("mobile-overlay")
     .addEventListener("click", () => setSidebar(false));
   document
-    .getElementById("reload-app")
-    .addEventListener("click", () => window.location.reload());
+    .getElementById("comfy-start")
+    .addEventListener("click", startComfy);
   document
-    .getElementById("refresh-page")
-    .addEventListener("click", refreshPage);
+    .getElementById("comfy-stop")
+    .addEventListener("click", stopComfy);
 
   window.addEventListener("hashchange", () => {
     state.cleanup?.();

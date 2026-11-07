@@ -101,18 +101,28 @@
           <p id="comfy-url" class="mt-1.5 truncate text-xs text-slate-400">
             Checking connection…
           </p>
+          <p id="comfy-state" class="mt-1 text-[11px] text-slate-500">
+            Checking…
+          </p>
           <div class="mt-2 flex items-center gap-2">
-            <button id="reload-app" class="btn-ghost btn-xs flex-1">
-              Reload app
-            </button>
-            <a
-              id="comfy-link"
-              href="#"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="btn-secondary btn-xs"
-              >Open</a
+            <button
+              id="comfy-start"
+              type="button"
+              class="btn-secondary btn-xs flex-1"
+              title="Start ComfyUI"
+              disabled
             >
+              Start
+            </button>
+            <button
+              id="comfy-stop"
+              type="button"
+              class="btn-ghost btn-xs flex-1"
+              title="Stop the ComfyUI process started by OpenSail"
+              disabled
+            >
+              Stop
+            </button>
           </div>
         </div>
       </div>
@@ -181,21 +191,6 @@
                   d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"
                 />
               </svg>
-            </button>
-            <button id="refresh-page" class="btn-secondary btn-xs">
-              <svg
-                viewBox="0 0 24 24"
-                class="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M20 11a8 8 0 1 0-2.3 5.7" />
-                <path d="M20 4v7h-7" />
-              </svg>
-              <span class="hidden sm:inline">Refresh</span>
             </button>
           </div>
         </div>

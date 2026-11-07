@@ -43,6 +43,7 @@ from .audio import (
 from .audio_models import AUDIO_MODELS
 from .chat import ChatModel, _image_content_part
 from .comfy_client import ComfyUIClient
+from .comfy_process import ComfyUIProcess
 from .config import (
     APP_AUTH,
     AUDIOCPP_VOICE_DIR,
@@ -99,6 +100,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Long-lived backend managers. They start their subprocesses lazily.
 client = ComfyUIClient()
+comfy_process = ComfyUIProcess()
 chat_model = ChatModel()
 audio_model = AudioModel()
 
@@ -443,7 +445,7 @@ class TTSBody(BaseModel):
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     yield
-    for manager in (chat_model, audio_model):
+    for manager in (chat_model, audio_model, comfy_process):
         try:
             manager.unload()
         except Exception:  # noqa: BLE001
@@ -538,6 +540,8 @@ def bootstrap() -> dict:
         "audio_status": audio_model.status(),
         "max_image_inputs": MAX_IMAGE_INPUTS,
         "comfy_url": COMFY_URL,
+        "comfy_configured": comfy_process.configured,
+        "comfy_managed": comfy_process.running,
         "server_name": SERVER_NAME,
         "server_port": SERVER_PORT,
         "auth_enabled": APP_AUTH is not None,
@@ -553,15 +557,51 @@ def status() -> dict:
         )
         return {
             "comfy": response.status_code < 500,
+            "comfy_managed": comfy_process.running,
+            "comfy_configured": comfy_process.configured,
             "chat_loaded": chat_model.loaded,
             "audio_loaded": audio_model.loaded,
         }
     except requests.RequestException:
         return {
             "comfy": False,
+            "comfy_managed": comfy_process.running,
+            "comfy_configured": comfy_process.configured,
             "chat_loaded": chat_model.loaded,
             "audio_loaded": audio_model.loaded,
         }
+
+
+@app.post("/api/comfy/start")
+def comfy_start() -> dict:
+    try:
+        message = comfy_process.start()
+    except AppError as exc:
+        raise AppError(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise AppError(f"Could not start ComfyUI: {exc}") from exc
+    return {
+        "status": message,
+        "comfy": comfy_process.reachable(),
+        "comfy_managed": comfy_process.running,
+        "comfy_configured": comfy_process.configured,
+    }
+
+
+@app.post("/api/comfy/stop")
+def comfy_stop() -> dict:
+    try:
+        message = comfy_process.stop()
+    except AppError as exc:
+        raise AppError(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise AppError(f"Could not stop ComfyUI: {exc}") from exc
+    return {
+        "status": message,
+        "comfy": comfy_process.reachable(),
+        "comfy_managed": comfy_process.running,
+        "comfy_configured": comfy_process.configured,
+    }
 
 
 @app.get("/api/workflows/{workflow_name}")

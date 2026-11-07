@@ -100,6 +100,25 @@ To use different paths, set `server_ssl_certfile` and `server_ssl_keyfile` in
 `configs/constants.json`. If you want a certificate the browser trusts without
 warnings, use mkcert or a publicly trusted certificate instead.
 
+### Starting and stopping ComfyUI
+
+The sidebar's **Start**/**Stop** buttons manage a local ComfyUI process. Set
+`comfy_dir` in `configs/constants.json` to the portable install folder (the one
+containing `python_embeded` and `ComfyUI`). The app then launches:
+
+```text
+python_embeded/python.exe -s ComfyUI/main.py <comfy_start_args>
+```
+
+and waits up to `comfy_start_timeout` seconds for `comfy_url` to answer.
+`comfy_python` and `comfy_main` override the default paths for non-portable
+installs, and `comfy_start_args` is a JSON list of extra arguments.
+
+If ComfyUI is already running, Start is disabled and no second copy is
+launched. Stop only terminates a process that OpenSail started; externally
+started instances are left alone. A managed process is stopped when OpenSail
+exits.
+
 ## Authentication
 
 The app can require a username and password before the UI is accessible. The
@@ -292,6 +311,11 @@ All configuration lives in the `configs/` folder. There are nine files:
 General settings:
 
 - `comfy_url` — base URL of the ComfyUI server
+- `comfy_dir` — portable ComfyUI folder containing `python_embeded` and `ComfyUI` (empty to manage it yourself)
+- `comfy_python` — optional Python executable override for non-portable installs
+- `comfy_main` — optional `main.py` override for non-portable installs
+- `comfy_start_args` — JSON list of arguments appended to `python -s main.py`
+- `comfy_start_timeout` — seconds to wait for ComfyUI to answer after Start
 - `server_name` — interface to bind (`0.0.0.0` exposes the UI on the LAN)
 - `server_port` — port to serve on
 - `server_public_access` — kept for compatibility; public tunnels are not used by the built-in server
