@@ -201,6 +201,9 @@ CHAT_SYSTEM_PROMPT = CONFIG.get(
 CHAT_SERVER_PATH = CONFIG.get("chat_server_path", "")
 # Port the app-managed llama-server listens on (bound to 127.0.0.1).
 CHAT_SERVER_PORT = int(CONFIG.get("chat_server_port", 8081))
+# Named chat personas (system prompt + voice engine/voice), managed by the
+# Chat tab and editable by hand.
+CHAT_PERSONAS_PATH = os.path.join(CONFIGS_DIR, "chat_personas.json")
 
 # --- audio.cpp settings ---------------------------------------------------
 # The "TextToSpeech" tab serves text-to-speech (and voice cloning) through

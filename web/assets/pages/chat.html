@@ -1,8 +1,8 @@
 <!-- Chat page markup. Hydrated by chat.js. -->
 <div class="flex min-h-[calc(100dvh-8.5rem)] flex-col gap-5">
   <div class="grid items-start gap-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
-    <section class="card">
-      <div class="card-header">
+    <details class="card group" open>
+      <summary class="card-header cursor-pointer list-none select-none">
         <div class="flex items-center gap-2.5">
           <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/10 text-sky-300" data-icon="cpu" data-icon-class="h-4 w-4"></span>
           <div>
@@ -10,8 +10,11 @@
             <p class="card-subtitle">llama-server runs locally</p>
           </div>
         </div>
-        <span class="chip" data-model-chip></span>
-      </div>
+        <div class="flex items-center gap-2">
+          <span class="chip" data-model-chip></span>
+          <span class="text-slate-500 transition group-open:rotate-180" data-icon="chevron" data-icon-class="h-4 w-4"></span>
+        </div>
+      </summary>
       <div class="space-y-3 p-4">
         <select class="select" data-model aria-label="Chat model"></select>
         <div class="flex gap-2">
@@ -20,10 +23,10 @@
         </div>
         <p class="rounded-lg border border-subtle bg-raised px-3 py-2 text-[11px] leading-5 text-slate-500">Unloading frees VRAM before running a ComfyUI generation.</p>
       </div>
-    </section>
+    </details>
 
-    <section class="card">
-      <div class="card-header">
+    <details class="card group" open>
+      <summary class="card-header cursor-pointer list-none select-none">
         <div class="flex items-center gap-2.5">
           <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300" data-icon="settings" data-icon-class="h-4 w-4"></span>
           <div>
@@ -31,8 +34,18 @@
             <p class="card-subtitle">Saved in this browser</p>
           </div>
         </div>
-      </div>
+        <span class="text-slate-500 transition group-open:rotate-180" data-icon="chevron" data-icon-class="h-4 w-4"></span>
+      </summary>
       <div class="space-y-4 p-4">
+        <div>
+          <label class="label" for="chat-persona">Persona</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <select id="chat-persona" class="select min-w-0 flex-1" data-persona></select>
+            <button type="button" class="btn-secondary btn-xs shrink-0" data-persona-save title="Save the current settings as a persona"><span data-icon="save" data-icon-class="h-3.5 w-3.5"></span> Save</button>
+            <button type="button" class="btn-ghost btn-xs shrink-0 text-rose-300 hover:bg-rose-500/10" data-persona-delete title="Delete the selected persona"><span data-icon="trash" data-icon-class="h-3.5 w-3.5"></span> Delete</button>
+          </div>
+          <p class="mt-1 text-[11px] leading-5 text-slate-500">Stores the system prompt, speech engine and voice.</p>
+        </div>
         <div>
           <label class="label" for="chat-system-prompt">System prompt</label>
           <textarea id="chat-system-prompt" class="textarea text-xs" rows="4" data-system placeholder="Instructions prepended to the conversation."></textarea>
@@ -52,26 +65,26 @@
           <label class="label" for="chat-browser-voice">Browser voice</label>
           <select id="chat-browser-voice" class="select" data-browser-voice></select>
         </div>
-        <div class="hidden space-y-2" data-pocket-voice-wrap>
+        <div class="hidden space-y-2" data-tts-voice-wrap>
           <div class="flex items-end gap-2">
             <div class="min-w-0 flex-1">
-              <label class="label" for="chat-pocket-voice">Voice</label>
-              <select id="chat-pocket-voice" class="select" data-pocket-voice></select>
+              <label class="label" for="chat-tts-voice">Voice</label>
+              <select id="chat-tts-voice" class="select" data-tts-voice></select>
             </div>
             <button class="btn-secondary btn-xs shrink-0" data-refresh-voices title="Load voices from audio.cpp"><span data-icon="refresh" data-icon-class="h-4 w-4"></span></button>
           </div>
-          <p class="text-[11px] text-slate-500">Saved clones appear here too.</p>
+          <p class="text-[11px] text-slate-500">Voices for the selected speech model. Saved clones appear here too.</p>
         </div>
         <div class="hidden" data-spoken-wrap>
           <label class="label">Last spoken reply</label>
           <audio class="w-full" controls data-spoken></audio>
         </div>
       </div>
-    </section>
+    </details>
   </div>
 
-  <section class="card flex min-h-[26rem] flex-1 flex-col overflow-hidden" style="max-height: 58rem">
-    <div class="flex flex-wrap items-center gap-3 border-b border-subtle px-4 py-3 sm:px-5">
+  <details class="card group flex flex-col overflow-hidden open:flex-1 open:min-h-[26rem]" style="max-height: 58rem" open>
+    <summary class="flex flex-wrap items-center gap-3 border-b border-subtle px-4 py-3 sm:px-5 cursor-pointer list-none select-none">
       <div class="flex items-center gap-2.5">
         <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-500/10 text-accent-300" data-icon="chat" data-icon-class="h-4 w-4"></span>
         <div class="min-w-0">
@@ -81,32 +94,36 @@
       </div>
       <div class="ml-auto flex items-center gap-2">
         <span class="chip hidden sm:inline-flex" data-chat-phase></span>
-        <button class="btn-ghost btn-xs" data-new-chat><span data-icon="plus" data-icon-class="h-4 w-4"></span> New chat</button>
+        <button type="button" class="btn-ghost btn-xs" data-new-chat><span data-icon="plus" data-icon-class="h-4 w-4"></span> New chat</button>
+        <span class="text-slate-500 transition group-open:rotate-180" data-icon="chevron" data-icon-class="h-4 w-4"></span>
       </div>
-    </div>
+    </summary>
 
-    <div class="min-h-0 flex-1 overflow-y-auto" data-messages aria-live="polite"></div>
+    <div class="flex flex-1 flex-col">
+      <div class="min-h-0 flex-1 overflow-y-auto" data-messages aria-live="polite"></div>
 
-    <form class="border-t border-subtle bg-ink-950/60 p-3 sm:p-4" data-composer>
-      <div class="rounded-2xl border border-white/10 bg-ink-950/80 p-2 transition focus-within:border-accent-400/40 focus-within:ring-2 focus-within:ring-accent-500/10">
-        <div class="hidden flex-wrap gap-2 px-1 pb-2" data-attachments></div>
-        <textarea class="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500" rows="1" placeholder="Send a message…" data-input></textarea>
-        <div class="flex items-center gap-1.5 px-1 pt-1.5">
-          <label class="icon-btn cursor-pointer" title="Attach an image" data-attach>
-            <span data-icon="attach" data-icon-class="h-5 w-5"></span>
-            <input type="file" accept="image/*" multiple class="sr-only" data-file />
-          </label>
-          <span class="text-[11px] text-slate-600">Enter to send · Shift+Enter for a new line</span>
-          <div class="ml-auto flex items-center gap-2">
-            <button type="button" class="btn-danger btn-xs" data-stop disabled><span data-icon="stop" data-icon-class="h-4 w-4"></span> Stop</button>
-            <button type="submit" class="btn-primary btn-xs" data-send><span data-icon="send" data-icon-class="h-4 w-4"></span> Send</button>
+      <form class="border-t border-subtle bg-ink-950/60 p-3 sm:p-4" data-composer>
+        <div class="rounded-2xl border border-white/10 bg-ink-950/80 p-2 transition focus-within:border-accent-400/40 focus-within:ring-2 focus-within:ring-accent-500/10">
+          <div class="hidden flex-wrap gap-2 px-1 pb-2" data-attachments></div>
+          <textarea class="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500" rows="1" placeholder="Send a message…" data-input></textarea>
+          <div class="flex items-center gap-1.5 px-1 pt-1.5">
+            <label class="icon-btn cursor-pointer" title="Attach an image" data-attach>
+              <span data-icon="attach" data-icon-class="h-5 w-5"></span>
+              <input type="file" accept="image/*" multiple class="sr-only" data-file />
+            </label>
+            <span class="text-[11px] text-slate-600">Enter to send · Shift+Enter for a new line</span>
+            <div class="ml-auto flex items-center gap-2">
+              <button type="button" class="btn-danger btn-xs" data-stop disabled><span data-icon="stop" data-icon-class="h-4 w-4"></span> Stop</button>
+              <button type="submit" class="btn-primary btn-xs" data-send><span data-icon="send" data-icon-class="h-4 w-4"></span> Send</button>
+            </div>
           </div>
         </div>
-      </div>
-      <button type="button" class="btn-secondary mt-3 w-full touch-none select-none py-3" title="Hold to Talk" aria-label="Hold to Talk" aria-pressed="false" data-talk hidden>
-        <span data-icon="mic" data-icon-class="h-5 w-5"></span>
-        <span data-talk-label>Hold to Talk</span>
-      </button>
-    </form>
-  </section>
+      </form>
+    </div>
+  </details>
+
+  <button type="button" class="btn-secondary w-full touch-none select-none py-3 hidden" title="Hold to Talk" aria-label="Hold to Talk" aria-pressed="false" data-talk>
+    <span data-icon="mic" data-icon-class="h-5 w-5"></span>
+    <span data-talk-label>Hold to Talk</span>
+  </button>
 </div>

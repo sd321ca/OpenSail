@@ -169,19 +169,22 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   token-by-token. Attach one or more images to a message to chat with a
   multimodal model (one with an `mmproj` configured in `chat_models.json`);
   images larger than 1 MP are downscaled automatically.
-  Under **Chat settings**, the **System prompt** box sets the
+  Under **Chat settings**, the **Persona** dropdown loads a saved bundle of the
+  system prompt, speech engine and voice; press **Save** to create or update a
+  persona and **Delete** to remove it (personas are stored in
+  `configs/chat_personas.json`). The **System prompt** box sets the
   instructions prepended to every conversation (leave empty for none), and the
   **Enable thinking** checkbox toggles the reasoning block for models that
   support it (e.g. Qwen3.5): checked, the model writes its thinking before
   answering; unchecked (the default), it replies directly.
   **Speak replies with** reads each assistant reply aloud, using either your
-  browser's built-in speech synthesis (**Browser**) or a local
-  [audio.cpp](https://github.com/0xShug0/audio.cpp) PocketTTS voice
-  (**PocketTTS**), which shows the spoken audio in a player. For **Browser**,
-  the **Voice** dropdown picks the installed system voice; for **PocketTTS**,
-  pick a **Speech model** (from `audio_models.json`) and a **Voice** (use
-  **Refresh** to list the model's voices, including clones saved on the
-  Text to Speech page).
+  browser's built-in speech synthesis (**Browser**) or any text-to-speech model
+  listed in `audio_models.json` (for example a local
+  [audio.cpp](https://github.com/0xShug0/audio.cpp) model), which shows the
+  spoken audio in a player. For **Browser**, the **Voice** dropdown picks the
+  installed system voice; for an audio.cpp model, the same **Voice** dropdown
+  lists that model's voices (use **Refresh** to load them, including clones
+  saved on the Text to Speech page).
   Press **Stop** to abort a reply that is still streaming. Press **Unload** to
   terminate the server and free its VRAM before running a
   ComfyUI workflow. The executable, port and load options come from
@@ -302,12 +305,13 @@ edited or reordered by hand.
 
 ## Configuration
 
-All configuration lives in the `configs/` folder. There are nine files:
+All configuration lives in the `configs/` folder. There are ten files:
 
 | File                    | Purpose                                                 |
 | ----------------------- | ------------------------------------------------------- |
 | `constants.json`        | Server and connection settings                          |
 | `chat_models.json`      | Chat page model aliases and GGUF paths                  |
+| `chat_personas.json`    | Saved chat personas (prompt, voice engine and voice)    |
 | `audio_models.json`     | Text to Speech page audio.cpp TTS models                |
 | `fields.json`           | Input registry and node-matching hints                  |
 | `workflow_fields.json`  | Per-workflow node selections shown in the Generate page |
@@ -396,6 +400,37 @@ the model can accept images (llama-server is launched with `--mmproj`):
 The dropdown shows the alias and uses the path as its value, so the model
 never has to be typed in the UI. The first entry is selected by default.
 
+### `chat_personas.json`
+
+Stores named chat personas created with the Chat page's **Persona** controls.
+A persona bundles the **system prompt**, the **voice engine** and the **voice**
+for that engine, so the same settings can be applied in one step:
+
+```json
+{
+  "personas": {
+    "Storyteller": {
+      "system_prompt": "You are a vivid storyteller.",
+      "voice_engine": "pocket-tts",
+      "voice": "af_heart"
+    },
+    "Code helper": {
+      "system_prompt": "Answer with concise, correct code.",
+      "voice_engine": "off",
+      "voice": ""
+    }
+  }
+}
+```
+
+`voice_engine` is `off`, `browser`, or a text-to-speech model id from
+`audio_models.json`; `voice` is the matching browser voice name or audio.cpp
+voice id (empty when the engine is `off`). Select a persona to apply it.
+**Save** stores the current settings under the name you enter (using an existing
+name updates that persona), and **Delete** removes the selected one. The file
+is optional and can be edited by hand; an engine that no longer matches a
+configured model falls back to `off` in the UI.
+
 ### `audio_models.json`
 
 Defines the models offered in the **Text to Speech** page's **Model** dropdown.
@@ -434,7 +469,10 @@ an audio.cpp **`id`** and **`family`**, plus a model location given as either a
 - Entries missing `alias`, `id`, `family` or a resolvable location are skipped.
 
 The dropdown shows the alias and uses the audio.cpp model `id` as its value.
-The first entry is selected by default.
+The first entry is selected by default. Every entry whose `task` is `tts` (or
+unset) is also offered in the Chat page's **Speak replies with** dropdown, so
+adding a model here makes it available for both text-to-speech and spoken chat
+replies.
 
 ### `fields.json`
 

@@ -37,6 +37,7 @@ configs/certs/*
 workflows/
 configs/audio_models.json
 configs/chat_models.json
+configs/chat_personas.json
 configs/constants.json
 configs/fields.json
 configs/samplers.json

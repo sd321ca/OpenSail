@@ -1,7 +1,9 @@
 import { api, stream, uploadFile } from "../api.js";
 import {
+  confirmDialog,
   escapeHtml,
   icon,
+  openModal,
   plainText,
   renderMarkdown,
   setButtonBusy,
@@ -10,8 +12,6 @@ import {
 } from "../ui.js";
 
 const STORAGE_KEY = "opensail.chat.settings.v1";
-// Engine id for server-side speech (audio.cpp), not a model id.
-const SERVER_TTS_ENGINE = "pocket";
 const SpeechRecognition =
   typeof window !== "undefined"
     ? window.SpeechRecognition || window.webkitSpeechRecognition
@@ -53,7 +53,8 @@ function loadSettings(boot) {
     thinking: saved.thinking ?? false,
     engine: saved.engine || "off",
     browserVoice: saved.browserVoice || "",
-    pocketVoice: saved.pocketVoice || "",
+    ttsVoice: saved.ttsVoice || "",
+    persona: saved.persona || "",
   };
 }
 
@@ -72,7 +73,8 @@ export async function renderChat(root, ctx) {
   let pendingImages = [];
   let running = false;
   let controller = null;
-  let pocketVoices = [];
+  let ttsVoices = [];
+  let ttsVoicesModel = "";
   let statusText = boot.chat_loaded ? boot.chat_status : "No model loaded. It loads on the first message.";
   let phaseText = "";
   let talkRecognition = null;
@@ -94,10 +96,17 @@ export async function renderChat(root, ctx) {
     .join("");
 
   const ttsModels = boot.tts_models || [];
-  const speechModel =
-    ttsModels.find((model) => model.id === boot.default_speech_model) ||
-    ttsModels[0] ||
-    null;
+  const ttsModelIds = new Set(ttsModels.map((model) => model.id));
+
+  // A server-side voice engine is any text-to-speech model from
+  // audio_models.json; "off" and "browser" are handled by the browser.
+  function isServerEngine(engine) {
+    return ttsModelIds.has(engine);
+  }
+
+  function selectedTtsModel() {
+    return ttsModels.find((model) => model.id === settings.engine) || null;
+  }
 
   root.innerHTML = await loadChatTemplate();
   root.querySelectorAll("[data-icon]").forEach((element) => {
@@ -129,9 +138,17 @@ export async function renderChat(root, ctx) {
   const engineSelect = $("[data-engine]");
   const browserVoiceSelect = $("[data-browser-voice]");
   const browserVoiceWrap = $("[data-browser-voice-wrap]");
-  const pocketVoiceSelect = $("[data-pocket-voice]");
-  const pocketVoiceWrap = $("[data-pocket-voice-wrap]");
-  const pocketModel = speechModel?.id || "";
+  const ttsVoiceSelect = $("[data-tts-voice]");
+  const ttsVoiceWrap = $("[data-tts-voice-wrap]");
+  const personaSelect = $("[data-persona]");
+  const personaSaveButton = $("[data-persona-save]");
+  const personaDeleteButton = $("[data-persona-delete]");
+
+  let personas = boot.chat_personas || {};
+  let selectedPersona = "";
+  // Name offered by the Save dialog. It survives a manual edit (which switches
+  // the dropdown to Custom) so the edited settings can update that persona.
+  let personaDraft = "";
 
   if (SpeechRecognition) {
     talkButton.classList.remove("hidden");
@@ -146,18 +163,20 @@ export async function renderChat(root, ctx) {
     modelOptions || '<option value="">No models configured</option>';
   systemInput.value = settings.systemPrompt;
   thinkingInput.checked = settings.thinking;
-  // The server-side engine is gated on a configured TTS model; its label comes
-  // from that model's alias rather than a hardcoded provider name.
-  if (speechModel) {
+  // Every text-to-speech model is offered as a server-side voice engine.
+  for (const model of ttsModels) {
     const option = document.createElement("option");
-    option.value = SERVER_TTS_ENGINE;
-    option.textContent = speechModel.alias;
+    option.value = model.id;
+    option.textContent = model.alias;
     engineSelect.append(option);
   }
   const engineValues = [...engineSelect.options].map((option) => option.value);
   if (engineValues.includes(settings.engine)) {
     engineSelect.value = settings.engine;
   }
+  // Keep the stored engine consistent with the rendered select (for example a
+  // speech model that was removed from audio_models.json).
+  settings.engine = engineSelect.value;
 
   saveSettings(settings);
 
@@ -552,37 +571,40 @@ export async function renderChat(root, ctx) {
 
   function updateSpeechVisibility() {
     const engine = settings.engine;
+    const server = isServerEngine(engine);
     browserVoiceWrap.classList.toggle("hidden", engine !== "browser");
-    pocketVoiceWrap.classList.toggle("hidden", engine !== SERVER_TTS_ENGINE);
-    spokenWrap.classList.toggle(
-      "hidden",
-      engine !== SERVER_TTS_ENGINE || !spoken.src,
-    );
+    ttsVoiceWrap.classList.toggle("hidden", !server);
+    spokenWrap.classList.toggle("hidden", !server || !spoken.src);
   }
 
-  async function refreshPocketVoices() {
-    if (!pocketModel) return;
+  async function refreshSpeechVoices() {
+    const model = selectedTtsModel();
+    if (!model) return;
     const button = $("[data-refresh-voices]");
     setButtonBusy(button, true, "Loading…");
     try {
-      const data = await api(`/api/audio/voices?model_id=${encodeURIComponent(pocketModel)}`);
-      pocketVoices = data.voices || [];
-      if (!pocketVoices.length) {
-        pocketVoiceSelect.innerHTML = '<option value="">No voices reported</option>';
-        toast("No PocketTTS voices were reported.", "warning");
+      const data = await api(`/api/audio/voices?model_id=${encodeURIComponent(model.id)}`);
+      // The user may have switched speech models while the request was in
+      // flight; ignore a response for a model that is no longer selected.
+      if (settings.engine !== model.id) return;
+      ttsVoices = data.voices || [];
+      ttsVoicesModel = model.id;
+      if (!ttsVoices.length) {
+        ttsVoiceSelect.innerHTML = '<option value="">No voices reported</option>';
+        toast(`No ${model.alias} voices were reported.`, "warning");
         return;
       }
-      if (!pocketVoices.includes(settings.pocketVoice)) {
-        settings.pocketVoice = pocketVoices[0];
+      if (!ttsVoices.includes(settings.ttsVoice)) {
+        settings.ttsVoice = ttsVoices[0];
         saveSettings(settings);
       }
-      pocketVoiceSelect.innerHTML = pocketVoices
+      ttsVoiceSelect.innerHTML = ttsVoices
         .map(
           (voice) =>
-            `<option value="${escapeHtml(voice)}" ${voice === settings.pocketVoice ? "selected" : ""}>${escapeHtml(voice)}</option>`,
+            `<option value="${escapeHtml(voice)}" ${voice === settings.ttsVoice ? "selected" : ""}>${escapeHtml(voice)}</option>`,
         )
         .join("");
-      toast(`Loaded ${pocketVoices.length} voice${pocketVoices.length === 1 ? "" : "s"}.`, "success");
+      toast(`Loaded ${ttsVoices.length} voice${ttsVoices.length === 1 ? "" : "s"}.`, "success");
     } catch (error) {
       toast(error.message, "error");
     } finally {
@@ -596,11 +618,208 @@ export async function renderChat(root, ctx) {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Personas                                                         */
+  /* ---------------------------------------------------------------- */
+
+  function personaVoice(engine) {
+    if (engine === "browser") return settings.browserVoice;
+    if (isServerEngine(engine)) return settings.ttsVoice;
+    return "";
+  }
+
+  function personaValues() {
+    return {
+      system_prompt: settings.systemPrompt,
+      voice_engine: settings.engine,
+      voice: personaVoice(settings.engine),
+    };
+  }
+
+  function personaMatches(persona) {
+    if (!persona) return false;
+    const engine = persona.voice_engine || "off";
+    return (
+      (persona.system_prompt || "") === settings.systemPrompt &&
+      engine === settings.engine &&
+      (persona.voice || "") === personaVoice(engine)
+    );
+  }
+
+  function updatePersonaButtons() {
+    const hasSelection = Boolean(selectedPersona);
+    personaDeleteButton.disabled = !hasSelection;
+    personaDeleteButton.classList.toggle("opacity-40", !hasSelection);
+    personaDeleteButton.classList.toggle("cursor-not-allowed", !hasSelection);
+  }
+
+  function renderPersonaSelect() {
+    const names = Object.keys(personas);
+    if (selectedPersona && !personas[selectedPersona]) selectedPersona = "";
+    personaSelect.innerHTML =
+      `<option value="">Custom (unsaved)</option>` +
+      names
+        .map(
+          (name) =>
+            `<option value="${escapeHtml(name)}" ${name === selectedPersona ? "selected" : ""}>${escapeHtml(name)}</option>`,
+        )
+        .join("");
+    personaSelect.value = selectedPersona;
+    updatePersonaButtons();
+  }
+
+  function markPersonaDirty() {
+    if (!selectedPersona) return;
+    selectedPersona = "";
+    settings.persona = "";
+    renderPersonaSelect();
+  }
+
+  async function applyPersona(persona) {
+    settings.systemPrompt = persona.system_prompt || "";
+    settings.engine = persona.voice_engine || "off";
+    systemInput.value = settings.systemPrompt;
+    const engines = [...engineSelect.options].map((option) => option.value);
+    if (!engines.includes(settings.engine)) settings.engine = "off";
+    engineSelect.value = settings.engine;
+    if (settings.engine === "browser") {
+      settings.browserVoice = persona.voice || "";
+      browserVoiceSelect.value = settings.browserVoice;
+    } else if (isServerEngine(settings.engine)) {
+      settings.ttsVoice = persona.voice || "";
+    }
+    updateSpeechVisibility();
+    saveSettings(settings);
+    if (isServerEngine(settings.engine)) {
+      if (ttsVoicesModel !== settings.engine) await refreshSpeechVoices();
+      ttsVoiceSelect.value = settings.ttsVoice;
+    }
+  }
+
+  function openPersonaDialog() {
+    const body = document.createElement("div");
+    body.className = "space-y-3";
+    body.innerHTML = `
+      <div>
+        <label class="label" for="chat-persona-name">Name</label>
+        <input id="chat-persona-name" class="input" maxlength="80" placeholder="e.g. Writing coach" value="${escapeHtml(selectedPersona || personaDraft)}" />
+      </div>
+      <p class="text-[11px] leading-5 text-slate-500">Saves the current system prompt, speech engine and voice. Using an existing name updates that persona.</p>
+    `;
+    const footer = document.createElement("div");
+    footer.className = "flex items-center justify-end gap-2";
+    footer.innerHTML = `
+      <button class="btn-secondary" data-cancel>Cancel</button>
+      <button class="btn-primary" data-confirm>${icon("save", "h-4 w-4")}<span>Save persona</span></button>
+    `;
+    const modal = openModal({
+      title: "Save persona",
+      subtitle: "Personas are stored on the server.",
+      content: body,
+      footer,
+    });
+    const nameInput = body.querySelector("#chat-persona-name");
+    const confirmButton = footer.querySelector("[data-confirm]");
+    const cancelButton = footer.querySelector("[data-cancel]");
+
+    const save = async () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        toast("Type a persona name first.", "warning");
+        nameInput.focus();
+        return;
+      }
+      if (personas[name] && name !== selectedPersona && name !== personaDraft) {
+        const okay = await confirmDialog(
+          `A persona called “${name}” already exists. Overwrite it?`,
+          { title: "Overwrite persona", confirmLabel: "Overwrite", danger: true },
+        );
+        if (!okay) return;
+      }
+      setButtonBusy(confirmButton, true, "Saving…");
+      try {
+        const data = await api("/api/chat/personas", {
+          method: "POST",
+          body: { name, ...personaValues() },
+        });
+        personas = data.personas || {};
+        boot.chat_personas = personas;
+        selectedPersona = name;
+        personaDraft = name;
+        settings.persona = name;
+        saveSettings(settings);
+        renderPersonaSelect();
+        modal.close();
+        toast(`Saved persona “${name}”.`, "success");
+      } catch (error) {
+        toast(error.message, "error");
+        setButtonBusy(confirmButton, false);
+      }
+    };
+
+    cancelButton.addEventListener("click", () => modal.close());
+    confirmButton.addEventListener("click", save);
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        save();
+      }
+    });
+  }
+
+  personaSelect.addEventListener("change", async () => {
+    const name = personaSelect.value;
+    selectedPersona = name;
+    personaDraft = name;
+    settings.persona = name;
+    try {
+      if (name && personas[name]) await applyPersona(personas[name]);
+      else saveSettings(settings);
+    } catch (error) {
+      toast(error.message, "error");
+    }
+    renderPersonaSelect();
+  });
+
+  personaSaveButton.addEventListener("click", openPersonaDialog);
+
+  personaDeleteButton.addEventListener("click", async () => {
+    const name = selectedPersona;
+    if (!name) return;
+    const okay = await confirmDialog(`Delete the persona “${name}”?`, {
+      title: "Delete persona",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!okay) return;
+    setButtonBusy(personaDeleteButton, true, "Deleting…");
+    try {
+      const data = await api("/api/chat/personas/delete", {
+        method: "POST",
+        body: { name },
+      });
+      personas = data.personas || {};
+      boot.chat_personas = personas;
+      selectedPersona = "";
+      personaDraft = "";
+      settings.persona = "";
+      saveSettings(settings);
+      renderPersonaSelect();
+      toast("Persona deleted.", "success");
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      setButtonBusy(personaDeleteButton, false);
+      updatePersonaButtons();
+    }
+  });
+
+  /* ---------------------------------------------------------------- */
   /* Settings                                                         */
   /* ---------------------------------------------------------------- */
 
   systemInput.addEventListener("input", () => {
     settings.systemPrompt = systemInput.value;
+    markPersonaDirty();
     saveSettings(settings);
   });
   thinkingInput.addEventListener("change", () => {
@@ -609,22 +828,41 @@ export async function renderChat(root, ctx) {
   });
   engineSelect.addEventListener("change", () => {
     settings.engine = engineSelect.value;
+    markPersonaDirty();
     saveSettings(settings);
     updateSpeechVisibility();
-    if (settings.engine === SERVER_TTS_ENGINE && pocketVoices.length === 0) {
-      refreshPocketVoices();
+    if (isServerEngine(settings.engine) && ttsVoicesModel !== settings.engine) {
+      refreshSpeechVoices();
     }
   });
   browserVoiceSelect.addEventListener("change", () => {
     settings.browserVoice = browserVoiceSelect.value;
+    markPersonaDirty();
     saveSettings(settings);
   });
-  pocketVoiceSelect.addEventListener("change", () => {
-    settings.pocketVoice = pocketVoiceSelect.value;
+  ttsVoiceSelect.addEventListener("change", () => {
+    settings.ttsVoice = ttsVoiceSelect.value;
+    markPersonaDirty();
     saveSettings(settings);
   });
-  $("[data-refresh-voices]")?.addEventListener("click", refreshPocketVoices);
+  $("[data-refresh-voices]")?.addEventListener("click", refreshSpeechVoices);
   updateSpeechVisibility();
+
+  // Restore the persona label only when the persisted settings still match it;
+  // an edited or updated persona then shows as "Custom (unsaved)".
+  renderPersonaSelect();
+  if (
+    settings.persona &&
+    personas[settings.persona] &&
+    personaMatches(personas[settings.persona])
+  ) {
+    selectedPersona = settings.persona;
+    personaDraft = selectedPersona;
+    renderPersonaSelect();
+  } else if (settings.persona) {
+    settings.persona = "";
+    saveSettings(settings);
+  }
 
   /* ---------------------------------------------------------------- */
   /* Model load / unload                                              */
@@ -734,7 +972,9 @@ export async function renderChat(root, ctx) {
           system_prompt: settings.systemPrompt,
           enable_thinking: settings.thinking,
           speak_engine: settings.engine,
-          voice: settings.pocketVoice || null,
+          voice: isServerEngine(settings.engine)
+            ? settings.ttsVoice || null
+            : null,
           model_path: settings.model || null,
         },
         (event) => {
@@ -816,7 +1056,10 @@ export async function renderChat(root, ctx) {
   });
   stopButton.addEventListener("click", stopGenerating);
 
-  $("[data-new-chat]")?.addEventListener("click", () => {
+  $("[data-new-chat]")?.addEventListener("click", (event) => {
+    // The button lives in the Conversation summary; do not toggle the panel.
+    event.preventDefault();
+    event.stopPropagation();
     if (talkState !== "idle") cancelTalk();
     if (running) {
       controller?.abort();

@@ -72,6 +72,7 @@ from .gallery import (
 )
 from .models import CHAT_MODELS, DEFAULT_CHAT_MODEL_PATH
 from .notes import get_workflow_notes, save_workflow_notes
+from .personas import delete_persona, get_personas, save_persona
 from .presets import (
     candidate_with_preset_value,
     delete_preset,
@@ -117,10 +118,7 @@ _media: dict[str, dict] = {}
 _STORE_TTL = 24 * 60 * 60
 
 TTS_MODELS = [entry for entry in AUDIO_MODELS if entry.get("task", "tts") == "tts"]
-DEFAULT_SPEECH_MODEL = next(
-    (entry["id"] for entry in AUDIO_MODELS if entry.get("family") == "pocket_tts"),
-    TTS_MODELS[0]["id"] if TTS_MODELS else None,
-)
+TTS_MODEL_IDS = {entry["id"] for entry in TTS_MODELS}
 
 
 # ---------------------------------------------------------------------------
@@ -342,14 +340,15 @@ def _chat_model_payload() -> list:
     ]
 
 
-def _synthesize_reply(text: str, voice: str | None) -> str | None:
-    """Synthesize text with audio.cpp and return a media URL, or None."""
-    if audio_model is None or not DEFAULT_SPEECH_MODEL or not text.strip():
+def _synthesize_reply(
+    text: str, voice: str | None, model_id: str | None
+) -> str | None:
+    """Synthesize text with an audio.cpp model and return a media URL, or None."""
+    model_id = (model_id or "").strip()
+    if audio_model is None or not model_id or not text.strip():
         return None
     path = None
-    for _status, audio in audio_model.generate(
-        DEFAULT_SPEECH_MODEL, text, voice=voice
-    ):
+    for _status, audio in audio_model.generate(model_id, text, voice=voice):
         path = audio
     if not path:
         return None
@@ -415,6 +414,17 @@ class ChatBody(BaseModel):
 
 class ChatLoadBody(BaseModel):
     path: Optional[str] = None
+
+
+class PersonaBody(BaseModel):
+    name: str
+    system_prompt: str = ""
+    voice_engine: str = "off"
+    voice: str = ""
+
+
+class PersonaNameBody(BaseModel):
+    name: str = ""
 
 
 class AudioLoadBody(BaseModel):
@@ -539,8 +549,8 @@ def bootstrap() -> dict:
         "tts_models": [
             {"alias": entry["alias"], "id": entry["id"]} for entry in TTS_MODELS
         ],
-        "default_speech_model": DEFAULT_SPEECH_MODEL,
         "chat_system_prompt": CHAT_SYSTEM_PROMPT,
+        "chat_personas": get_personas(),
         "chat_loaded": chat_model.loaded,
         "chat_status": chat_model.status(),
         "audio_loaded": audio_model.loaded,
@@ -1056,7 +1066,7 @@ def _chat_events(body: ChatBody):
             return
 
         if (
-            body.speak_engine == "pocket"
+            body.speak_engine in TTS_MODEL_IDS
             and text.strip()
             and not chat_model.cancelled
         ):
@@ -1064,7 +1074,7 @@ def _chat_events(body: ChatBody):
                 {"type": "phase", "message": "Synthesizing the reply..."}
             )
             try:
-                url = _synthesize_reply(text, body.voice)
+                url = _synthesize_reply(text, body.voice, body.speak_engine)
                 if url:
                     yield _sse({"type": "audio", "url": url})
             except Exception as exc:  # noqa: BLE001
@@ -1110,6 +1120,36 @@ def chat_unload() -> dict:
 def chat_cancel() -> dict:
     chat_model.cancel()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Chat personas
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/chat/personas")
+def chat_personas() -> dict:
+    return {"personas": get_personas()}
+
+
+@app.post("/api/chat/personas")
+def post_chat_persona(body: PersonaBody) -> dict:
+    try:
+        save_persona(body.name, body.model_dump())
+    except (OSError, ValueError) as exc:
+        raise AppError(f"Could not save the persona: {exc}") from exc
+    return {"personas": get_personas()}
+
+
+@app.post("/api/chat/personas/delete")
+def post_delete_chat_persona(body: PersonaNameBody) -> dict:
+    try:
+        removed = delete_persona(body.name)
+    except OSError as exc:
+        raise AppError(f"Could not delete the persona: {exc}") from exc
+    if not removed:
+        raise AppError("That persona no longer exists.")
+    return {"personas": get_personas()}
 
 
 # ---------------------------------------------------------------------------
