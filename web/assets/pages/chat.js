@@ -12,6 +12,14 @@ import {
 const STORAGE_KEY = "opensail.chat.settings.v1";
 // Engine id for server-side speech (audio.cpp), not a model id.
 const SERVER_TTS_ENGINE = "pocket";
+const SpeechRecognition =
+  typeof window !== "undefined"
+    ? window.SpeechRecognition || window.webkitSpeechRecognition
+    : null;
+const speechInputReady =
+  Boolean(SpeechRecognition) &&
+  typeof window !== "undefined" &&
+  window.isSecureContext;
 
 let templatePromise = null;
 
@@ -67,6 +75,15 @@ export async function renderChat(root, ctx) {
   let pocketVoices = [];
   let statusText = boot.chat_loaded ? boot.chat_status : "No model loaded. It loads on the first message.";
   let phaseText = "";
+  let talkRecognition = null;
+  let talkState = "idle";
+  let talkFinal = "";
+  let talkInterim = "";
+  let talkPressed = false;
+  let talkReleaseRequested = false;
+  let talkErrored = false;
+  let talkCancelled = false;
+  let talkDisposed = false;
 
   const chatModels = boot.chat_models || [];
   const modelOptions = chatModels
@@ -99,6 +116,8 @@ export async function renderChat(root, ctx) {
   const modelSelect = $("[data-model]");
   const attachLabel = $("[data-attach]");
   const fileInput = $("[data-file]");
+  const talkButton = $("[data-talk]");
+  const talkLabel = $("[data-talk-label]");
   const attachmentsEl = $("[data-attachments]");
   const chatStatus = $("[data-chat-status]");
   const phaseChip = $("[data-chat-phase]");
@@ -113,6 +132,15 @@ export async function renderChat(root, ctx) {
   const pocketVoiceSelect = $("[data-pocket-voice]");
   const pocketVoiceWrap = $("[data-pocket-voice-wrap]");
   const pocketModel = speechModel?.id || "";
+
+  if (SpeechRecognition) {
+    talkButton.classList.remove("hidden");
+    if (!speechInputReady) {
+      talkButton.classList.add("cursor-not-allowed", "opacity-40");
+      talkButton.title = "Voice input requires HTTPS or localhost.";
+      talkButton.setAttribute("aria-label", talkButton.title);
+    }
+  }
 
   modelSelect.innerHTML =
     modelOptions || '<option value="">No models configured</option>';
@@ -281,6 +309,221 @@ export async function renderChat(root, ctx) {
   });
 
   /* ---------------------------------------------------------------- */
+  /* Push to talk                                                     */
+  /* ---------------------------------------------------------------- */
+
+  function setTalkState(state) {
+    talkState = state;
+    const active = state === "starting" || state === "listening";
+    talkButton.classList.toggle("btn-secondary", !active);
+    talkButton.classList.toggle("btn-danger", active);
+    talkButton.setAttribute("aria-pressed", String(active));
+    const label = !speechInputReady
+      ? "Voice input requires HTTPS or localhost."
+      : state === "finishing"
+        ? "Transcribing…"
+        : active
+          ? "Release to Send"
+          : "Hold to Talk";
+    talkLabel.textContent = label;
+    talkButton.title = label;
+    talkButton.setAttribute("aria-label", label);
+    talkButton.disabled =
+      state === "finishing" || running || !chatModels.length || !speechInputReady;
+    if (active) setPhase("Listening…");
+    else if (state === "finishing") setPhase("Transcribing…");
+    else setPhase("");
+  }
+
+  function finishTalk() {
+    if (talkDisposed || talkCancelled) return;
+    const text = `${talkFinal} ${talkInterim}`.replace(/\s+/g, " ").trim();
+    const errored = talkErrored;
+    talkRecognition = null;
+    talkFinal = "";
+    talkInterim = "";
+    talkPressed = false;
+    talkReleaseRequested = false;
+    talkErrored = false;
+    setTalkState("idle");
+    if (!text) {
+      if (!errored) toast("No speech was detected.", "warning", 2200);
+      return;
+    }
+    const existing = input.value.trim();
+    input.value = existing ? `${existing} ${text}` : text;
+    sendMessage();
+  }
+
+  function stopTalk() {
+    talkReleaseRequested = true;
+    if (talkState === "idle" || talkState === "finishing") return;
+    if (talkState === "starting") return;
+    setTalkState("finishing");
+    try {
+      talkRecognition?.stop();
+    } catch (_error) {
+      finishTalk();
+    }
+  }
+
+  function startTalk() {
+    if (
+      !speechInputReady ||
+      running ||
+      !chatModels.length ||
+      talkState !== "idle"
+    ) {
+      return;
+    }
+    talkCancelled = false;
+    talkErrored = false;
+    talkReleaseRequested = false;
+    talkFinal = "";
+    talkInterim = "";
+    // Avoid feeding the assistant's own speech back into the microphone.
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    spoken.pause();
+    talkRecognition = new SpeechRecognition();
+    talkRecognition.lang = navigator.language || "en-US";
+    talkRecognition.continuous = true;
+    talkRecognition.interimResults = true;
+    talkRecognition.maxAlternatives = 1;
+
+    talkRecognition.onstart = () => {
+      if (talkDisposed || talkCancelled) return;
+      if (talkState === "starting") setTalkState("listening");
+      if (talkReleaseRequested) stopTalk();
+    };
+
+    talkRecognition.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const transcript = result[0]?.transcript || "";
+        if (result.isFinal) talkFinal += transcript;
+        else interim += transcript;
+      }
+      talkInterim = interim;
+    };
+
+    talkRecognition.onerror = (event) => {
+      if (event.error === "aborted" || talkDisposed || talkCancelled) return;
+      talkErrored = true;
+      const messages = {
+        "not-allowed": "Microphone access was denied.",
+        "audio-capture": "No microphone was found.",
+        "no-speech": "No speech was detected.",
+        network: "Speech recognition needs a network connection.",
+      };
+      toast(
+        messages[event.error] || `Speech recognition failed: ${event.error}`,
+        event.error === "no-speech" ? "warning" : "error",
+      );
+    };
+
+    talkRecognition.onend = () => {
+      if (talkDisposed || talkCancelled) return;
+      if (!talkReleaseRequested && talkPressed && !talkErrored) {
+        // Browsers can end recognition after a pause even while the button is
+        // still held; keep the transcript and continue listening.
+        talkFinal += talkInterim;
+        talkInterim = "";
+        try {
+          talkRecognition.start();
+          return;
+        } catch (_error) {
+          // Fall through and finish with what has been captured.
+        }
+      }
+      finishTalk();
+    };
+
+    setTalkState("starting");
+    try {
+      talkRecognition.start();
+    } catch (error) {
+      talkRecognition = null;
+      talkPressed = false;
+      toast(error.message || "Could not start speech recognition.", "error");
+      setTalkState("idle");
+    }
+  }
+
+  function cancelTalk() {
+    talkCancelled = true;
+    talkReleaseRequested = true;
+    talkPressed = false;
+    talkFinal = "";
+    talkInterim = "";
+    const recognition = talkRecognition;
+    talkRecognition = null;
+    if (recognition) {
+      try {
+        recognition.abort();
+      } catch (_error) {
+        // Already stopped.
+      }
+    }
+    setTalkState("idle");
+  }
+
+  talkButton.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (running || talkState !== "idle") return;
+    event.preventDefault();
+    talkPressed = true;
+    try {
+      talkButton.setPointerCapture(event.pointerId);
+    } catch (_error) {
+      // Pointer capture is optional.
+    }
+    startTalk();
+  });
+
+  function releaseTalk(event) {
+    if (!talkPressed) return;
+    talkPressed = false;
+    try {
+      if (talkButton.hasPointerCapture(event.pointerId)) {
+        talkButton.releasePointerCapture(event.pointerId);
+      }
+    } catch (_error) {
+      // Pointer capture is optional.
+    }
+    stopTalk();
+  }
+
+  talkButton.addEventListener("pointerup", releaseTalk);
+  talkButton.addEventListener("pointercancel", releaseTalk);
+  talkButton.addEventListener("lostpointercapture", () => {
+    if (!talkPressed) return;
+    talkPressed = false;
+    stopTalk();
+  });
+  talkButton.addEventListener("contextmenu", (event) => event.preventDefault());
+
+  talkButton.addEventListener("keydown", (event) => {
+    if (event.key !== " " && event.key !== "Enter") return;
+    if (event.repeat || running || talkState !== "idle") return;
+    event.preventDefault();
+    talkPressed = true;
+    startTalk();
+  });
+  talkButton.addEventListener("keyup", (event) => {
+    if (event.key !== " " && event.key !== "Enter") return;
+    event.preventDefault();
+    if (!talkPressed) return;
+    talkPressed = false;
+    stopTalk();
+  });
+  talkButton.addEventListener("blur", () => {
+    if (!talkPressed) return;
+    talkPressed = false;
+    stopTalk();
+  });
+
+  /* ---------------------------------------------------------------- */
   /* Speech                                                           */
   /* ---------------------------------------------------------------- */
 
@@ -440,6 +683,8 @@ export async function renderChat(root, ctx) {
     sendButton.disabled = value;
     sendButton.innerHTML = value ? `${spinner("h-3.5 w-3.5")} Sending…` : `${icon("send", "h-4 w-4")} Send`;
     stopButton.disabled = !value;
+    talkButton.disabled =
+      value || !speechInputReady || !chatModels.length || talkState === "finishing";
   }
 
   function setPhase(text) {
@@ -450,7 +695,7 @@ export async function renderChat(root, ctx) {
   }
 
   async function sendMessage() {
-    if (running) return;
+    if (running || talkState !== "idle") return;
     const text = input.value.trim();
     if (!text && !pendingImages.length) return;
 
@@ -572,6 +817,7 @@ export async function renderChat(root, ctx) {
   stopButton.addEventListener("click", stopGenerating);
 
   $("[data-new-chat]")?.addEventListener("click", () => {
+    if (talkState !== "idle") cancelTalk();
     if (running) {
       controller?.abort();
       api("/api/chat/cancel", { method: "POST" }).catch(() => {});
@@ -589,6 +835,15 @@ export async function renderChat(root, ctx) {
   updateAttachAvailability();
 
   return () => {
+    talkDisposed = true;
+    if (talkRecognition) {
+      try {
+        talkRecognition.abort();
+      } catch (_error) {
+        // Already stopped.
+      }
+      talkRecognition = null;
+    }
     if (running) {
       controller?.abort();
       api("/api/chat/cancel", { method: "POST" }).catch(() => {});

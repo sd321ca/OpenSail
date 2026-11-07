@@ -131,6 +131,17 @@ COMFY_URL = CONFIG["comfy_url"]
 SERVER_NAME = CONFIG["server_name"]
 SERVER_PORT = CONFIG["server_port"]
 SERVER_PUBLIC_ACCESS = bool(CONFIG.get("server_public_access", False))
+# Optional TLS. These default to configs/certs/{cert,key}.pem; generate a
+# certificate there (mkcert or openssl) to serve the dashboard over HTTPS.
+# When either file is absent the app falls back to HTTP. Browsers require a
+# secure context for microphone access unless the page is on localhost/127.0.0.1.
+CERTS_DIR = os.path.join(CONFIGS_DIR, "certs")
+SERVER_SSL_CERTFILE = CONFIG.get("server_ssl_certfile") or os.path.join(
+    CERTS_DIR, "cert.pem"
+)
+SERVER_SSL_KEYFILE = CONFIG.get("server_ssl_keyfile") or os.path.join(
+    CERTS_DIR, "key.pem"
+)
 # When True, node inputs with no matching field definition are still offered
 # in the picker with a generic widget based on their value type.
 SHOW_UNMATCHED_NODE_INPUTS = bool(

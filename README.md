@@ -66,6 +66,40 @@ The dashboard opens in dark mode and includes a sun/moon button in the header
 to switch to light mode. The choice is saved in the browser; on a first visit
 the OS color-scheme preference is used.
 
+### HTTPS and microphone access
+
+Browser microphone access (used by the Chat page's hold-to-talk button) requires
+a secure context. `http://localhost` and `http://127.0.0.1` count as secure, but
+a LAN address such as `http://192.168.1.25:7860` does not.
+
+The app looks for TLS files at `configs/certs/cert.pem` and
+`configs/certs/key.pem` by default. Create a self-signed certificate there
+(from Git Bash, WSL, or any shell with OpenSSL):
+
+```bash
+cd configs/certs
+openssl req -new -x509 -keyout key.pem -out cert.pem -days 365 -nodes
+```
+
+Restart `python app.py` and open `https://<host>:7860`; HTTPS is used
+automatically when both files exist. If either file is missing, the app falls
+back to HTTP. The certificate contents are git-ignored.
+
+Because this is a self-signed certificate, the browser will still warn until
+you accept/trust it. Modern browsers also require a Subject Alternative Name
+(SAN); if the browser rejects the certificate, regenerate it with the hostname
+and/or LAN IP included:
+
+```bash
+openssl req -new -x509 -keyout key.pem -out cert.pem -days 365 -nodes \
+  -subj "/CN=opensail.local" \
+  -addext "subjectAltName=DNS:opensail.local,IP:192.168.1.25"
+```
+
+To use different paths, set `server_ssl_certfile` and `server_ssl_keyfile` in
+`configs/constants.json`. If you want a certificate the browser trusts without
+warnings, use mkcert or a publicly trusted certificate instead.
+
 ## Authentication
 
 The app can require a username and password before the UI is accessible. The
@@ -100,7 +134,6 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
 ## Pages
 
 <img width="750" height="1325" alt="features" src="https://github.com/user-attachments/assets/01fa2f2f-7e1b-4a19-8ee7-3f1dfb59c804" />
-
 
 - **Chat** — talk to a local GGUF model served by
   [llama-server](https://github.com/ggml-org/llama.cpp), launched as a
@@ -138,7 +171,6 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
 
   <img width="375" height="1286" alt="chat2" src="https://github.com/user-attachments/assets/571e1b7b-1e01-420f-8119-84314cdb7331" />
 
-
 - **Generate** — pick a workflow, choose which node inputs to control, and
   generate an image, a song or a video. Press **Choose inputs…** to open a
   popup listing every editable node input in the workflow (node ID, title and
@@ -169,7 +201,7 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
     ComfyUI and used as that node's video before the workflow runs. Press
     **Load from Gallery** beside the heading to pick one of the videos you have
     already generated instead of uploading a file.
-    
+
 <img width="634" height="351" alt="choose_inputs2" src="https://github.com/user-attachments/assets/2c249c2a-d2cb-451b-9781-85abf5e61748" />
 
 <img width="375" height="1674" alt="generation2" src="https://github.com/user-attachments/assets/59751a09-2997-45f4-b3f8-329f7c4c15c4" />
@@ -198,7 +230,6 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   files are loaded.
 
   <img width="375" height="687" alt="gallery2" src="https://github.com/user-attachments/assets/38088c6f-180e-4fec-afdf-06bf7264449c" />
-
 
 ## Adding workflows
 
@@ -264,6 +295,8 @@ General settings:
 - `server_name` — interface to bind (`0.0.0.0` exposes the UI on the LAN)
 - `server_port` — port to serve on
 - `server_public_access` — kept for compatibility; public tunnels are not used by the built-in server
+- `server_ssl_certfile` — path to a TLS certificate (defaults to `configs/certs/cert.pem`)
+- `server_ssl_keyfile` — path to the matching TLS private key (defaults to `configs/certs/key.pem`)
 - `show_unmatched_node_inputs` - when true, node inputs that match no field definition are offered with a generic textbox / number / checkbox (default false)
 - `default_workflow` - workflow filename selected when the UI first loads
 - `chat_n_ctx` — context window size in tokens

@@ -29,6 +29,10 @@ pnpm-debug.log*
 # Saved voice-cloning references (auto-generated, machine-specific)
 voices/
 
+# Locally generated TLS certificates / private keys
+configs/certs/*
+!configs/certs/.gitkeep
+
 # Workflows and machine-specific config
 workflows/
 configs/audio_models.json

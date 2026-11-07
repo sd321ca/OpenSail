@@ -3,6 +3,8 @@
   "server_name": "0.0.0.0",
   "server_port": 7860,
   "server_public_access": false,
+  "server_ssl_certfile": "configs/certs/cert.pem",
+  "server_ssl_keyfile": "configs/certs/key.pem",
   "show_unmatched_node_inputs": false,
   "default_workflow": "Image Gen - Text Input.json",
   "chat_n_ctx": 4096,
