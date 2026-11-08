@@ -83,8 +83,8 @@
     </details>
   </div>
 
-  <details class="card group flex flex-col overflow-hidden open:flex-1 open:min-h-[26rem]" style="max-height: 58rem" open>
-    <summary class="flex flex-wrap items-center gap-3 border-b border-subtle px-4 py-3 sm:px-5 cursor-pointer list-none select-none">
+  <details class="card group chat-conversation flex flex-col overflow-hidden open:flex-1 open:min-h-[26rem]" open>
+    <summary class="flex shrink-0 flex-wrap items-center gap-3 border-b border-subtle px-4 py-3 sm:px-5 cursor-pointer list-none select-none">
       <div class="flex items-center gap-2.5">
         <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-500/10 text-accent-300" data-icon="chat" data-icon-class="h-4 w-4"></span>
         <div class="min-w-0">
@@ -99,10 +99,10 @@
       </div>
     </summary>
 
-    <div class="flex flex-1 flex-col">
+    <div class="flex min-h-0 flex-1 flex-col">
       <div class="min-h-0 flex-1 overflow-y-auto" data-messages aria-live="polite"></div>
 
-      <form class="border-t border-subtle bg-ink-950/60 p-3 sm:p-4" data-composer>
+      <form class="shrink-0 border-t border-subtle bg-ink-950/60 p-3 sm:p-4" data-composer>
         <div class="rounded-2xl border border-white/10 bg-ink-950/80 p-2 transition focus-within:border-accent-400/40 focus-within:ring-2 focus-within:ring-accent-500/10">
           <div class="hidden flex-wrap gap-2 px-1 pb-2" data-attachments></div>
           <textarea class="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500" rows="1" placeholder="Send a message…" data-input></textarea>

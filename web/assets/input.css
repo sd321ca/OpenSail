@@ -341,6 +341,22 @@
     @apply mr-auto max-w-[92%] rounded-2xl rounded-bl-md border border-subtle bg-raised px-4 py-2.5 text-sm leading-6 text-slate-200;
   }
 
+  /* Keep the chat panel inside the viewport so the message list scrolls and
+     the composer stays reachable. Browsers that expose ::details-content wrap
+     the panel body in a block box, so that box has to become the flex item
+     that shrinks; otherwise tall conversations overflow and hide the composer. */
+  .chat-conversation {
+    max-height: min(58rem, calc(100dvh - 8.5rem));
+  }
+
+  .chat-conversation::details-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .gallery-tile {
     @apply relative overflow-hidden rounded-2xl border border-subtle bg-ink-900 transition hover:border-accent-400/30 hover:shadow-glow;
   }
