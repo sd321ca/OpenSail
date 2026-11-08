@@ -252,6 +252,54 @@ def _sanitize_voice_name(name: str) -> str:
     return cleaned.replace(" ", "_").strip("._-")
 
 
+def list_saved_voices(voice_dir: str) -> list:
+    """Return the names of the custom voices saved in ``voice_dir``."""
+    if not voice_dir or not os.path.isdir(voice_dir):
+        return []
+    names = []
+    try:
+        with os.scandir(voice_dir) as entries:
+            for entry in entries:
+                if entry.is_file() and entry.name.lower().endswith(".wav"):
+                    names.append(os.path.splitext(entry.name)[0])
+    except OSError:
+        return []
+    return sorted(names, key=str.lower)
+
+
+def delete_saved_voice(voice_dir: str, name: str) -> bool:
+    """Delete a saved voice reference and its transcript entry.
+
+    Returns True when the WAV was removed, or False when no such voice exists.
+    """
+    clean = _sanitize_voice_name(name)
+    if not voice_dir or not clean:
+        return False
+    path = os.path.join(voice_dir, f"{clean}.wav")
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise AppError(f"Could not delete the saved voice: {exc}") from exc
+
+    prompt_path = os.path.join(voice_dir, "prompt_text")
+    if os.path.isfile(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+            kept = [line for line in lines if not line.startswith(f"{clean}|")]
+            if len(kept) != len(lines):
+                with open(prompt_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(kept) + ("\n" if kept else ""))
+        except OSError as exc:
+            raise AppError(
+                "The voice was deleted, but its transcript entry could not "
+                f"be updated: {exc}"
+            ) from exc
+    return True
+
+
 def _save_voice_reference(
     voice_dir: str, name: str, wav_path: str, transcript: str
 ) -> str:

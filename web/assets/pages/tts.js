@@ -1,5 +1,6 @@
 import { api, stream, uploadFile } from "../api.js";
 import {
+  confirmDialog,
   emptyState,
   escapeHtml,
   icon,
@@ -13,6 +14,7 @@ export async function renderTTS(root, ctx) {
   const models = boot.audio_models || [];
   let modelId = boot.default_audio_model || models[0]?.id || "";
   let voices = [];
+  let savedVoices = [];
   let reference = null;
   let referenceTranscript = "";
   let voiceName = "";
@@ -96,6 +98,7 @@ export async function renderTTS(root, ctx) {
             </summary>
             <div class="space-y-4 border-t border-subtle p-4 sm:p-5">
               <div class="rounded-xl border border-subtle bg-raised p-3" data-ref-panel></div>
+              <div class="rounded-xl border border-subtle bg-raised p-3" data-saved-voices-panel></div>
               <div class="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label class="label" for="tts-seed">Seed</label>
@@ -188,6 +191,47 @@ export async function renderTTS(root, ctx) {
     $("[data-voice-status]").textContent = voices.length
       ? `${voices.length} voice${voices.length === 1 ? "" : "s"} available.`
       : "Voices are listed from the running server.";
+  }
+
+  function renderSavedVoices() {
+    const panel = $("[data-saved-voices-panel]");
+    if (!panel) return;
+    if (!savedVoices.length) {
+      panel.innerHTML = `<p class="text-[11px] leading-5 text-slate-500">No saved custom voices yet. Upload a reference clip above and save it to reuse it here and in Chat.</p>`;
+      return;
+    }
+    panel.innerHTML = `
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <p class="text-xs font-semibold text-slate-300">Saved voices</p>
+        <span class="text-[11px] text-slate-500">${savedVoices.length}</span>
+      </div>
+      <ul class="space-y-1.5">
+        ${savedVoices
+          .map(
+            (name) => `
+          <li class="flex items-center gap-2 rounded-lg border border-subtle bg-ink-950/40 px-2.5 py-1.5">
+            <span class="min-w-0 flex-1 truncate text-xs text-slate-300">${escapeHtml(name)}</span>
+            <button type="button" class="btn-ghost btn-xs shrink-0 text-rose-300 hover:bg-rose-500/10" data-delete-voice="${escapeHtml(name)}" title="Delete ${escapeHtml(name)}">${icon("trash", "h-3.5 w-3.5")}</button>
+          </li>`,
+          )
+          .join("")}
+      </ul>
+    `;
+    panel.querySelectorAll("[data-delete-voice]").forEach((button) => {
+      button.addEventListener("click", () =>
+        deleteSavedVoice(button.dataset.deleteVoice, button),
+      );
+    });
+  }
+
+  async function loadSavedVoices() {
+    try {
+      const data = await api("/api/audio/saved-voices");
+      savedVoices = data.voices || [];
+    } catch (_error) {
+      savedVoices = [];
+    }
+    renderSavedVoices();
   }
 
   function renderResult() {
@@ -301,12 +345,43 @@ export async function renderTTS(root, ctx) {
       renderVoices();
       voiceInput.value = data.name;
       voiceName = "";
+      await loadSavedVoices();
       renderReferencePanel();
       toast(data.status, "success");
     } catch (error) {
       toast(error.message, "error");
     } finally {
       setButtonBusy(button, false);
+    }
+  }
+
+  async function deleteSavedVoice(name, button) {
+    const okay = await confirmDialog(
+      `Delete the saved voice “${name}”? Its reference clip and transcript entry will be removed.`,
+      {
+        title: "Delete saved voice",
+        confirmLabel: "Delete",
+        danger: true,
+      },
+    );
+    if (!okay) return;
+
+    setButtonBusy(button, true, "Deleting…");
+    try {
+      const data = await api("/api/audio/delete-voice", {
+        method: "POST",
+        body: { name },
+      });
+      savedVoices = data.voices || savedVoices.filter((voice) => voice !== name);
+      renderSavedVoices();
+      voices = voices.filter(
+        (voice) => voice !== name && voice !== data.name,
+      );
+      renderVoices();
+      toast(data.status, "success");
+    } catch (error) {
+      toast(error.message, "error");
+      if (button.isConnected) setButtonBusy(button, false);
     }
   }
 
@@ -435,6 +510,7 @@ export async function renderTTS(root, ctx) {
 
   renderReferencePanel();
   renderVoices();
+  loadSavedVoices();
   renderResult();
   setRunning(false);
   setStatus(statusText, boot.audio_loaded);

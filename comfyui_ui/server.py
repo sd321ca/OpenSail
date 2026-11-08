@@ -39,6 +39,8 @@ from .audio import (
     _convert_to_wav,
     _sanitize_voice_name,
     _save_voice_reference,
+    delete_saved_voice,
+    list_saved_voices,
 )
 from .audio_models import AUDIO_MODELS
 from .chat import ChatModel, _image_content_part
@@ -436,6 +438,10 @@ class SaveVoiceBody(BaseModel):
     name: str
     upload: str
     transcript: str = ""
+
+
+class DeleteVoiceBody(BaseModel):
+    name: str
 
 
 class TTSBody(BaseModel):
@@ -1207,6 +1213,11 @@ def audio_voices(model_id: str) -> dict:
     return {"voices": voices}
 
 
+@app.get("/api/audio/saved-voices")
+def audio_saved_voices() -> dict:
+    return {"voices": list_saved_voices(AUDIOCPP_VOICE_DIR)}
+
+
 @app.post("/api/audio/load")
 def audio_load(body: AudioLoadBody) -> dict:
     try:
@@ -1256,6 +1267,20 @@ def audio_save_voice(body: SaveVoiceBody) -> dict:
         "status": f"Saved voice {clean}. It is also available in Chat.",
         "name": clean,
         "voices": voices or [clean],
+    }
+
+
+@app.post("/api/audio/delete-voice")
+def audio_delete_voice(body: DeleteVoiceBody) -> dict:
+    clean = _sanitize_voice_name(body.name)
+    if not clean:
+        raise AppError("Choose a saved voice to delete.")
+    if not delete_saved_voice(AUDIOCPP_VOICE_DIR, clean):
+        raise AppError("That saved voice no longer exists.")
+    return {
+        "status": f"Deleted saved voice {clean}.",
+        "name": clean,
+        "voices": list_saved_voices(AUDIOCPP_VOICE_DIR),
     }
 
 
