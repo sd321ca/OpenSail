@@ -589,6 +589,21 @@ def status() -> dict:
         }
 
 
+@app.post("/history")
+def clear_history() -> dict:
+    """Clear ComfyUI's generation history."""
+    try:
+        response = requests.post(
+            f"{COMFY_URL.rstrip('/')}/history",
+            json={"clear": True},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise AppError(f"Could not clear ComfyUI history: {exc}") from exc
+    return {"status": "History cleared."}
+
+
 @app.post("/api/comfy/start")
 def comfy_start() -> dict:
     try:
