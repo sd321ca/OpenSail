@@ -228,12 +228,31 @@
   }
 
   .modal-backdrop {
-    @apply fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-6;
+    @apply fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center;
+    /* Mobile browser toolbars change the visible height (notably Brave's).
+       Size the sheet against the dynamic viewport and keep it clear of the
+       status bar / home indicator so the close button stays reachable. */
+    height: 100dvh;
+    padding: max(env(safe-area-inset-top), 0.5rem) env(safe-area-inset-right)
+      env(safe-area-inset-bottom) env(safe-area-inset-left);
     animation: fade-up 160ms ease-out both;
   }
 
+  @media (min-width: 640px) {
+    .modal-backdrop {
+      padding: max(1.5rem, env(safe-area-inset-top))
+        max(1.5rem, env(safe-area-inset-right))
+        max(1.5rem, env(safe-area-inset-bottom))
+        max(1.5rem, env(safe-area-inset-left));
+    }
+  }
+
   .modal-panel {
-    @apply flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl border border-strong bg-ink-900 shadow-2xl shadow-black/50 sm:rounded-3xl;
+    @apply flex w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl border border-strong bg-ink-900 shadow-2xl shadow-black/50 sm:rounded-3xl;
+    /* Leave a gap above the sheet so the header (and its close button) never
+       sits underneath a mobile browser's top toolbar. */
+    max-height: 92vh;
+    max-height: 92%;
   }
 
   .modal-panel-lg {

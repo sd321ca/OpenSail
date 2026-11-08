@@ -215,12 +215,12 @@ export function openModal({
   wrapper.className = "modal-backdrop";
   wrapper.innerHTML = `
     <div class="modal-panel ${size === "lg" ? "modal-panel-lg" : ""}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
-      <div class="flex items-start gap-3 border-b border-subtle px-4 py-4 sm:px-6">
+      <div class="flex shrink-0 items-start gap-3 border-b border-subtle px-4 py-4 sm:px-6">
         <div class="min-w-0 flex-1">
           <h2 class="text-base font-semibold tracking-tight text-slate-100">${escapeHtml(title)}</h2>
           ${subtitle ? `<p class="mt-0.5 text-xs leading-5 text-slate-400">${escapeHtml(subtitle)}</p>` : ""}
         </div>
-        <button class="icon-btn -mr-2 -mt-1 shrink-0" data-modal-close aria-label="Close">${icon("close")}</button>
+        <button class="icon-btn -mr-2 h-10 w-10 shrink-0 touch-manipulation sm:h-9 sm:w-9" data-modal-close aria-label="Close">${icon("close")}</button>
       </div>
       <div class="modal-body" data-modal-body></div>
     </div>
@@ -232,7 +232,7 @@ export function openModal({
 
   if (footer) {
     const foot = document.createElement("div");
-    foot.className = "flex flex-wrap items-center justify-end gap-2 border-t border-subtle bg-ink-900/95 px-4 py-3 sm:px-6";
+    foot.className = "flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-subtle bg-ink-900/95 px-4 py-3 sm:px-6";
     if (footer instanceof Node) foot.appendChild(footer);
     else foot.innerHTML = footer;
     panel.appendChild(foot);
