@@ -449,6 +449,11 @@ class TTSBody(BaseModel):
     reference_text: str = ""
 
 
+class FreeBody(BaseModel):
+    unload_models: bool = False
+    free_memory: bool = False
+
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
@@ -602,6 +607,27 @@ def clear_history() -> dict:
     except requests.RequestException as exc:
         raise AppError(f"Could not clear ComfyUI history: {exc}") from exc
     return {"status": "History cleared."}
+
+
+@app.post("/free")
+def free_memory(body: FreeBody = Body(default=FreeBody())) -> dict:
+    """Ask ComfyUI to unload models and/or free cached memory."""
+    try:
+        response = requests.post(
+            f"{COMFY_URL.rstrip('/')}/free",
+            json=body.model_dump(),
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise AppError(f"Could not free ComfyUI memory: {exc}") from exc
+
+    actions = []
+    if body.unload_models:
+        actions.append("Models unloaded")
+    if body.free_memory:
+        actions.append("Memory freed")
+    return {"status": " and ".join(actions) + "." if actions else "Nothing to do."}
 
 
 @app.post("/api/comfy/start")
