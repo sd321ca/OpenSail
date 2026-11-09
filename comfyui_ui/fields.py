@@ -26,10 +26,9 @@ Each field entry has the shape::
         }
     }
 
-``options`` are passed to the dashboard's matching control, except for two
-registry-only keys: ``choices_source`` (dropdown choices, see
-``resolve_choices``) and ``fullscreen`` (textbox only, kept for backwards
-compatibility with older field registries).
+``options`` are passed to the dashboard's matching control, except for the
+registry-only ``choices_source`` key (dropdown choices, see
+``resolve_choices``).
 """
 
 import json
