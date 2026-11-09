@@ -262,7 +262,10 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   filename and prompt; clicking one opens the video player. Videos generated
   through the Generate page get a still frame saved as `<filename>.jpg` in the
   `thumbnails/` folder, which is used as the preview image. Use **Refresh** to
-  reload and the slider to cap how many files are loaded.
+  reload and the slider to cap how many files are loaded. Cached thumbnails are
+  checked at startup and when a gallery is refreshed; any whose original
+  ComfyUI media file no longer exists are deleted. When the local ComfyUI
+  folders are not configured, ComfyUI's history is used as the fallback check.
 
   <img width="375" height="687" alt="gallery2" src="https://github.com/user-attachments/assets/38088c6f-180e-4fec-afdf-06bf7264449c" />
 

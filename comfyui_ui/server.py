@@ -68,6 +68,7 @@ from .fields import (
     save_workflow_fields,
 )
 from .gallery import (
+    cleanup_orphaned_thumbnails,
     file_proxy_url,
     list_gallery_audio,
     list_gallery_images,
@@ -124,6 +125,13 @@ _uploads: dict[str, dict] = {}
 _media: dict[str, dict] = {}
 _STORE_TTL = 24 * 60 * 60
 
+# Orphaned thumbnails are checked at startup and when a gallery is opened. A
+# short throttle keeps switching between gallery tabs from rescanning the
+# ComfyUI media folders repeatedly.
+_thumbnail_cleanup_lock = threading.Lock()
+_last_thumbnail_cleanup = 0.0
+_THUMBNAIL_CLEANUP_INTERVAL = 60.0
+
 TTS_MODELS = [entry for entry in AUDIO_MODELS if entry.get("task", "tts") == "tts"]
 TTS_MODEL_IDS = {entry["id"] for entry in TTS_MODELS}
 
@@ -163,6 +171,24 @@ def _cleanup_stores() -> None:
                         os.remove(item["path"])
                     except OSError:
                         pass
+
+
+def _cleanup_thumbnails(force: bool = False) -> None:
+    """Remove cached thumbnails whose source media file is gone."""
+    global _last_thumbnail_cleanup
+    now = time.time()
+    if not force and now - _last_thumbnail_cleanup < _THUMBNAIL_CLEANUP_INTERVAL:
+        return
+
+    with _thumbnail_cleanup_lock:
+        now = time.time()
+        if not force and now - _last_thumbnail_cleanup < _THUMBNAIL_CLEANUP_INTERVAL:
+            return
+        _last_thumbnail_cleanup = now
+        try:
+            cleanup_orphaned_thumbnails(client)
+        except Exception:  # noqa: BLE001 - cleanup is best-effort
+            pass
 
 
 def _store_upload(path: str, content_type: str, name: str) -> dict:
@@ -472,6 +498,13 @@ class FreeBody(BaseModel):
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    # Scan in the background so a large ComfyUI output folder does not delay
+    # startup.
+    threading.Thread(
+        target=_cleanup_thumbnails,
+        kwargs={"force": True},
+        daemon=True,
+    ).start()
     yield
     for manager in (chat_model, audio_model):
         try:
@@ -988,6 +1021,7 @@ def cancel_generation() -> dict:
 
 @app.get("/api/gallery/images")
 def gallery_images(limit: int = Query(200, ge=1, le=1000)) -> dict:
+    _cleanup_thumbnails()
     return {"items": list_gallery_images(client, limit=limit)}
 
 
@@ -998,6 +1032,7 @@ def gallery_audio(limit: int = Query(200, ge=1, le=1000)) -> dict:
 
 @app.get("/api/gallery/videos")
 def gallery_videos(limit: int = Query(200, ge=1, le=1000)) -> dict:
+    _cleanup_thumbnails()
     return {"items": list_gallery_videos(client, limit=limit)}
 
 

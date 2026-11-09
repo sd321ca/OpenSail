@@ -152,6 +152,14 @@ if not COMFY_PYTHON and COMFY_DIR:
 COMFY_MAIN = _config_path(CONFIG.get("comfy_main", ""))
 if not COMFY_MAIN and COMFY_DIR:
     COMFY_MAIN = os.path.join(COMFY_DIR, "ComfyUI", "main.py")
+# Directories where ComfyUI stores generated and uploaded media. They are used
+# to tell whether a cached gallery thumbnail's source file still exists.
+COMFY_MEDIA_DIRS = []
+if COMFY_MAIN:
+    _COMFY_ROOT = os.path.dirname(COMFY_MAIN)
+    COMFY_MEDIA_DIRS = [
+        os.path.join(_COMFY_ROOT, name) for name in ("output", "input", "temp")
+    ]
 _configured_args = CONFIG.get("comfy_start_args", ["--listen", "0.0.0.0"])
 if isinstance(_configured_args, str):
     _configured_args = shlex.split(_configured_args)

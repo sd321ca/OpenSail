@@ -16,7 +16,7 @@ from PIL import Image
 
 from .audio import _resolve_ffmpeg
 from .comfy_client import ComfyUIClient, is_video_filename
-from .config import COMFY_URL, THUMBNAILS_DIR
+from .config import COMFY_MEDIA_DIRS, COMFY_URL, THUMBNAILS_DIR
 from .errors import AppError
 
 # Route on the app server that proxies a ComfyUI output file (images, audio and
@@ -168,6 +168,91 @@ def save_video_thumbnail(filename: str, video_path: str) -> bool:
             os.remove(frame_path)
         except OSError:
             pass
+
+
+def _thumbnail_source_name(name: str) -> str:
+    """Return the media filename a cached thumbnail was created from.
+
+    Image thumbnails keep the original filename. Video thumbnails append an
+    image extension, so ``clip.mp4.jpg`` maps back to ``clip.mp4``.
+    """
+    for extension in (".jpg", ".png"):
+        if name.lower().endswith(extension):
+            candidate = name[: -len(extension)]
+            if is_video_filename(candidate):
+                return candidate
+    return name
+
+
+def _known_source_filenames(client: ComfyUIClient | None) -> set[str] | None:
+    """Return filenames known to still exist, or None when this is unknown.
+
+    When the ComfyUI install is on this machine, its media folders are scanned
+    directly. Otherwise ComfyUI's history is used as a conservative fallback.
+    """
+
+    def raise_walk_error(error: OSError) -> None:
+        # Let an unreadable folder abort the cleanup instead of treating every
+        # thumbnail as orphaned.
+        raise error
+
+    filenames = set()
+    scanned = False
+    for directory in COMFY_MEDIA_DIRS:
+        if not os.path.isdir(directory):
+            continue
+        scanned = True
+        for _root, _dirs, files in os.walk(directory, onerror=raise_walk_error):
+            filenames.update(files)
+    if scanned:
+        return filenames
+    if client is None:
+        return None
+
+    try:
+        history = client.get_history()
+    except Exception:  # noqa: BLE001 - cleanup must never break a request
+        return None
+
+    for entry in history.values():
+        outputs = entry.get("outputs", {})
+        for node_output in outputs.values():
+            for key in ("images", "video", "audio"):
+                for ref in node_output.get(key) or []:
+                    filename = ref.get("filename") if isinstance(ref, dict) else None
+                    if filename:
+                        filenames.add(os.path.basename(filename))
+    return filenames
+
+
+def cleanup_orphaned_thumbnails(
+    client: ComfyUIClient | None = None,
+) -> list[str]:
+    """Delete cached thumbnails whose original media file no longer exists.
+
+    Returns the filenames that were removed. The check is skipped when neither
+    local ComfyUI media folders nor its history can be read.
+    """
+    if not os.path.isdir(THUMBNAILS_DIR):
+        return []
+
+    sources = _known_source_filenames(client)
+    if sources is None:
+        return []
+
+    removed = []
+    for name in os.listdir(THUMBNAILS_DIR):
+        path = os.path.join(THUMBNAILS_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        if _thumbnail_source_name(name) in sources:
+            continue
+        try:
+            os.remove(path)
+            removed.append(name)
+        except OSError:
+            pass
+    return removed
 
 
 def _sorted_history(history: dict) -> list:
