@@ -28,6 +28,11 @@ THUMBNAIL_ROUTE = "/api/gallery/thumbnail"
 # Longest edge of a gallery thumbnail, in pixels. Images are only ever shrunk,
 # never upscaled.
 THUMBNAIL_MAX_SIZE = (480, 480)
+# JPEG settings shared by image and video thumbnails.
+THUMBNAIL_JPEG_QUALITY = 82
+
+# Image sources that can be re-encoded as JPEG without changing the filename.
+JPEG_EXTENSIONS = (".jpg", ".jpeg")
 
 
 def file_proxy_url(ref: dict) -> str:
@@ -54,11 +59,47 @@ def thumbnail_path(filename: str) -> str | None:
     return os.path.join(THUMBNAILS_DIR, name)
 
 
+def _image_thumbnail_name(filename: str) -> str | None:
+    """Return the cached JPEG filename for an image source.
+
+    JPEG sources keep their filename. Other formats append ``.jpg`` so the
+    browser still serves the converted bytes with the correct MIME type.
+    """
+    name = _thumbnail_name(filename)
+    if name is None:
+        return None
+    if os.path.splitext(name)[1].lower() in JPEG_EXTENSIONS:
+        return name
+    return f"{name}.jpg"
+
+
+def _write_jpeg_thumbnail(image: Image.Image, target: str) -> None:
+    """Downscale an image and write it as a compact JPEG."""
+    thumbnail = image.copy()
+    thumbnail.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
+    if thumbnail.mode in ("RGBA", "LA") or (
+        thumbnail.mode == "P" and "transparency" in thumbnail.info
+    ):
+        rgba = thumbnail.convert("RGBA")
+        opaque = Image.new("RGB", rgba.size, "white")
+        opaque.paste(rgba, mask=rgba.split()[-1])
+        thumbnail = opaque
+    else:
+        thumbnail = thumbnail.convert("RGB")
+    thumbnail.save(
+        target,
+        format="JPEG",
+        quality=THUMBNAIL_JPEG_QUALITY,
+        optimize=True,
+        progressive=True,
+    )
+
+
 def thumbnail_url(filename: str) -> str | None:
     """Return the proxy URL for a cached thumbnail, or None if unavailable.
 
-    Images keep their original filename; videos use ``<filename>.jpg`` because
-    a still frame is encoded as JPEG.
+    JPEG images reuse their original filename. Other images and videos use
+    ``<filename>.jpg`` because the preview itself is encoded as JPEG.
     """
     name = _thumbnail_name(filename)
     if name is None:
@@ -70,35 +111,30 @@ def thumbnail_url(filename: str) -> str | None:
 
 
 def save_image_thumbnail(filename: str, content: bytes) -> bool:
-    """Save a downscaled copy of an image using its original filename.
+    """Save a compact JPEG preview of an image.
 
     The file is written to :data:`config.THUMBNAILS_DIR`, so the gallery can
     use it as a lightweight preview. Failures are reported by returning False
     rather than raised: a missing thumbnail should never break generation.
     """
-    path = thumbnail_path(filename)
-    if path is None:
+    name = _image_thumbnail_name(filename)
+    if name is None:
         return False
+    target = os.path.join(THUMBNAILS_DIR, name)
 
     try:
         os.makedirs(THUMBNAILS_DIR, exist_ok=True)
         with Image.open(io.BytesIO(content)) as source:
-            thumbnail = source.copy()
-        thumbnail.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
-
-        extension = os.path.splitext(path)[1].lower()
-        image_format = Image.registered_extensions().get(extension)
-        if image_format is None:
-            return False
-
-        options = {}
-        if image_format in ("JPEG", "WEBP"):
-            if thumbnail.mode not in ("RGB", "L"):
-                thumbnail = thumbnail.convert("RGB")
-            options["quality"] = 85
-        if image_format == "PNG":
-            options["optimize"] = True
-        thumbnail.save(path, format=image_format, **options)
+            image = source.copy()
+        _write_jpeg_thumbnail(image, target)
+        # Drop a legacy same-name thumbnail (for example a large PNG) so the
+        # gallery picks up the new JPEG immediately.
+        legacy = thumbnail_path(filename)
+        if legacy and legacy != target:
+            try:
+                os.remove(legacy)
+            except OSError:
+                pass
         return True
     except Exception:  # noqa: BLE001 - thumbnails are best-effort
         return False
@@ -159,7 +195,13 @@ def save_video_thumbnail(filename: str, video_path: str) -> bool:
         thumbnail.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
 
         target = os.path.join(THUMBNAILS_DIR, f"{name}.jpg")
-        thumbnail.save(target, format="JPEG", quality=85, optimize=True)
+        thumbnail.save(
+            target,
+            format="JPEG",
+            quality=THUMBNAIL_JPEG_QUALITY,
+            optimize=True,
+            progressive=True,
+        )
         return True
     except Exception:  # noqa: BLE001 - thumbnails are best-effort
         return False
@@ -170,16 +212,19 @@ def save_video_thumbnail(filename: str, video_path: str) -> bool:
             pass
 
 
-def _thumbnail_source_name(name: str) -> str:
+def _thumbnail_source_name(name: str, sources: set[str]) -> str:
     """Return the media filename a cached thumbnail was created from.
 
-    Image thumbnails keep the original filename. Video thumbnails append an
-    image extension, so ``clip.mp4.jpg`` maps back to ``clip.mp4``.
+    JPEG image thumbnails may keep the original filename, while other image
+    and video thumbnails append an image extension. Older thumbnails used the
+    full original filename, so both shapes are checked.
     """
+    if name in sources:
+        return name
     for extension in (".jpg", ".png"):
         if name.lower().endswith(extension):
             candidate = name[: -len(extension)]
-            if is_video_filename(candidate):
+            if candidate in sources:
                 return candidate
     return name
 
@@ -233,19 +278,19 @@ def cleanup_orphaned_thumbnails(
     Returns the filenames that were removed. The check is skipped when neither
     local ComfyUI media folders nor its history can be read.
     """
+    removed = []
     if not os.path.isdir(THUMBNAILS_DIR):
-        return []
+        return removed
 
     sources = _known_source_filenames(client)
     if sources is None:
-        return []
+        return removed
 
-    removed = []
     for name in os.listdir(THUMBNAILS_DIR):
         path = os.path.join(THUMBNAILS_DIR, name)
         if not os.path.isfile(path):
             continue
-        if _thumbnail_source_name(name) in sources:
+        if _thumbnail_source_name(name, sources) in sources:
             continue
         try:
             os.remove(path)
