@@ -1058,18 +1058,36 @@ export async function renderGenerate(root, ctx) {
     const candidates = (config.selected || [])
       .map((bindingId) => candidatesById.get(bindingId))
       .filter(Boolean);
+    // The seed control may be hidden, so look at every candidate rather than
+    // only the selected ones.
+    const hasSeed = config.candidates.some((candidate) =>
+      /(^|_)(noise_)?seed$/.test(candidate.input),
+    );
+    const randomizeRow = hasSeed
+      ? `<label class="flex items-center justify-between gap-3 rounded-xl border border-subtle bg-raised px-3 py-2.5">
+           <span><span class="block text-sm font-medium text-slate-200">Randomize seed</span><span class="text-[11px] text-slate-500">Use a fresh seed on every run</span></span>
+           <span class="switch"><input type="checkbox" ${randomize ? "checked" : ""} data-randomize /><span></span></span>
+         </label>`
+      : "";
+    const bindRandomize = () => {
+      controls.querySelector("[data-randomize]")?.addEventListener("change", (event) => {
+        randomize = event.target.checked;
+      });
+    };
+
     $("[data-controls-summary]").textContent = `${candidates.length} control${candidates.length === 1 ? "" : "s"} shown`;
     if (!candidates.length) {
-      controls.innerHTML = emptyState(
-        "No inputs selected",
-        "Use Choose inputs to pick which workflow parameters appear here.",
-        "settings",
-      );
-      controls.insertAdjacentHTML(
-        "beforeend",
-        '<div class="flex justify-center"><button class="btn-secondary btn-xs" data-empty-choose>Choose inputs</button></div>',
-      );
+      controls.innerHTML = `
+        ${emptyState(
+          "No inputs selected",
+          "Use Choose inputs to pick which workflow parameters appear here.",
+          "settings",
+        )}
+        <div class="mt-4 flex justify-center"><button class="btn-secondary btn-xs" data-empty-choose>Choose inputs</button></div>
+        ${randomizeRow ? `<div class="mt-4">${randomizeRow}</div>` : ""}
+      `;
       controls.querySelector("[data-empty-choose]")?.addEventListener("click", openInputPicker);
+      bindRandomize();
       return;
     }
 
@@ -1079,19 +1097,11 @@ export async function renderGenerate(root, ctx) {
       }
     }
 
-    const hasSeed = candidates.some((candidate) => /(^|_)(noise_)?seed$/.test(candidate.input));
     controls.innerHTML = `
       <div class="space-y-4">
         ${candidates.map((candidate) => controlHtml(candidate, state.values[candidate.id])).join("")}
       </div>
-      ${
-        hasSeed
-          ? `<label class="flex items-center justify-between gap-3 rounded-xl border border-subtle bg-raised px-3 py-2.5">
-               <span><span class="block text-sm font-medium text-slate-200">Randomize seed</span><span class="text-[11px] text-slate-500">Use a fresh seed on every run</span></span>
-               <span class="switch"><input type="checkbox" ${randomize ? "checked" : ""} data-randomize /><span></span></span>
-             </label>`
-          : ""
-      }
+      ${randomizeRow ? `<div class="mt-4">${randomizeRow}</div>` : ""}
     `;
 
     controls.querySelectorAll("[data-binding]").forEach((input) => {
@@ -1126,9 +1136,7 @@ export async function renderGenerate(root, ctx) {
       }
     });
 
-    controls.querySelector("[data-randomize]")?.addEventListener("change", (event) => {
-      randomize = event.target.checked;
-    });
+    bindRandomize();
   }
 
   /* ---------------------------------------------------------------- */

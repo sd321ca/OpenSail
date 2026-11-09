@@ -842,14 +842,19 @@ def _generate_events(body: GenerateBody):
 
         if body.randomize_seed:
             seed = random.randint(0, 2**32 - 1)
-            values = {
-                binding_id: (
-                    seed
-                    if binding_id.partition("|")[2] in ("seed", "noise_seed")
-                    else value
-                )
-                for binding_id, value in values.items()
+            # Apply the same fresh seed to every seed input in the workflow,
+            # whether or not its control is currently shown.
+            seed_ids = {
+                candidate["id"]
+                for candidate in list_node_candidates(workflow_name)
+                if candidate["input"] in ("seed", "noise_seed")
             }
+            seed_ids.update(
+                binding_id
+                for binding_id in values
+                if binding_id.partition("|")[2] in ("seed", "noise_seed")
+            )
+            values = {**values, **{binding_id: seed for binding_id in seed_ids}}
 
         yield _sse({"type": "phase", "message": "Uploading inputs..."})
         yield _sse(
