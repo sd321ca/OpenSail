@@ -8,10 +8,13 @@ directly. This module only discovers the items; the HTTP layer in
 
 import io
 import os
+import subprocess
+import tempfile
 from urllib.parse import urlencode
 
 from PIL import Image
 
+from .audio import _resolve_ffmpeg
 from .comfy_client import ComfyUIClient, is_video_filename
 from .config import COMFY_URL, THUMBNAILS_DIR
 from .errors import AppError
@@ -37,21 +40,32 @@ def file_proxy_url(ref: dict) -> str:
     return f"{FILE_PROXY_ROUTE}?" + urlencode(params)
 
 
-def thumbnail_path(filename: str) -> str | None:
-    """Return the local path of an image's cached thumbnail, if it has one."""
+def _thumbnail_name(filename: str) -> str | None:
+    """Return the safe, flat filename used for a cached thumbnail."""
     name = os.path.basename(filename or "")
-    if not name:
+    return name or None
+
+
+def thumbnail_path(filename: str) -> str | None:
+    """Return the local path for a cached thumbnail filename."""
+    name = _thumbnail_name(filename)
+    if name is None:
         return None
     return os.path.join(THUMBNAILS_DIR, name)
 
 
 def thumbnail_url(filename: str) -> str | None:
-    """Return the proxy URL for a cached thumbnail, or None if unavailable."""
-    path = thumbnail_path(filename)
-    if path and os.path.isfile(path):
-        return f"{THUMBNAIL_ROUTE}?" + urlencode(
-            {"filename": os.path.basename(filename)}
-        )
+    """Return the proxy URL for a cached thumbnail, or None if unavailable.
+
+    Images keep their original filename; videos use ``<filename>.jpg`` because
+    a still frame is encoded as JPEG.
+    """
+    name = _thumbnail_name(filename)
+    if name is None:
+        return None
+    for candidate in (name, f"{name}.jpg", f"{name}.png"):
+        if os.path.isfile(os.path.join(THUMBNAILS_DIR, candidate)):
+            return f"{THUMBNAIL_ROUTE}?" + urlencode({"filename": candidate})
     return None
 
 
@@ -88,6 +102,72 @@ def save_image_thumbnail(filename: str, content: bytes) -> bool:
         return True
     except Exception:  # noqa: BLE001 - thumbnails are best-effort
         return False
+
+
+def save_video_thumbnail(filename: str, video_path: str) -> bool:
+    """Extract a still frame and save it as the video's cached thumbnail.
+
+    The image is written as ``<video filename>.jpg`` in
+    :data:`config.THUMBNAILS_DIR`. Video decoding needs ffmpeg; when it is not
+    available, or extraction fails, this returns False without raising.
+    """
+    name = _thumbnail_name(filename)
+    ffmpeg = _resolve_ffmpeg()
+    if name is None or not ffmpeg or not os.path.isfile(video_path):
+        return False
+
+    os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+    fd, frame_path = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    try:
+        # Seek past a black or title frame when possible, then fall back to the
+        # very first frame for very short clips.
+        for seek in ("0.5", "0"):
+            proc = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    seek,
+                    "-i",
+                    video_path,
+                    "-frames:v",
+                    "1",
+                    frame_path,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=creationflags,
+                timeout=30,
+            )
+            if (
+                proc.returncode == 0
+                and os.path.isfile(frame_path)
+                and os.path.getsize(frame_path) > 0
+            ):
+                break
+        else:
+            return False
+
+        with Image.open(frame_path) as source:
+            thumbnail = source.convert("RGB")
+        thumbnail.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
+
+        target = os.path.join(THUMBNAILS_DIR, f"{name}.jpg")
+        thumbnail.save(target, format="JPEG", quality=85, optimize=True)
+        return True
+    except Exception:  # noqa: BLE001 - thumbnails are best-effort
+        return False
+    finally:
+        try:
+            os.remove(frame_path)
+        except OSError:
+            pass
 
 
 def _sorted_history(history: dict) -> list:
@@ -209,5 +289,6 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
                     "prompt": prompt_text,
                 }
                 ref["url"] = file_proxy_url(ref)
+                ref["thumbnail_url"] = thumbnail_url(ref["filename"])
                 videos.append(ref)
     return videos

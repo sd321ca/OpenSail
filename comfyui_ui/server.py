@@ -73,6 +73,7 @@ from .gallery import (
     list_gallery_images,
     list_gallery_videos,
     save_image_thumbnail,
+    save_video_thumbnail,
     thumbnail_path,
 )
 from .models import CHAT_MODELS, DEFAULT_CHAT_MODEL_PATH
@@ -920,6 +921,12 @@ def _generate_events(body: GenerateBody):
         elif kind == KIND_VIDEO:
             video_ref = client.wait_for_video(prompt_id, client_id)
             path = client.fetch_video(video_ref)
+            # Cache a still frame for the Video Gallery's preview poster.
+            # This is best-effort: a failure here must not fail generation.
+            try:
+                save_video_thumbnail(video_ref.get("filename", ""), path)
+            except Exception:  # noqa: BLE001
+                pass
             yield _sse(
                 {
                     "type": "result",

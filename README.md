@@ -258,9 +258,11 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   seed). Use **Refresh** to reload and the slider to cap how many files are
   loaded.
 - **Video Gallery** — browse previously generated videos pulled from ComfyUI's
-  history. Each file is shown as an inline video player labelled with its
-  filename and prompt. Use **Refresh** to reload and the slider to cap how many
-  files are loaded.
+  history. Each file is shown as a clickable thumbnail labelled with its
+  filename and prompt; clicking one opens the video player. Videos generated
+  through the Generate page get a still frame saved as `<filename>.jpg` in the
+  `thumbnails/` folder, which is used as the preview image. Use **Refresh** to
+  reload and the slider to cap how many files are loaded.
 
   <img width="375" height="687" alt="gallery2" src="https://github.com/user-attachments/assets/38088c6f-180e-4fec-afdf-06bf7264449c" />
 

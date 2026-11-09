@@ -784,7 +784,18 @@ export async function renderGenerate(root, ctx) {
           .map(
             (item, itemIndex) => `
             <button class="group overflow-hidden rounded-xl border border-subtle bg-raised text-left transition hover:border-accent-400/40 hover:bg-raised" data-video-item="${itemIndex}">
-              <video class="aspect-video w-full bg-ink-950 object-cover" muted preload="metadata" src="${escapeHtml(item.url)}"></video>
+              <div class="relative aspect-video overflow-hidden bg-ink-950">
+                ${
+                  item.thumbnail_url
+                    ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-300 group-hover:scale-105" />`
+                    : `<span class="flex h-full w-full items-center justify-center text-slate-600">${icon("film", "h-7 w-7")}</span>`
+                }
+                <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10">
+                  <span class="flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white">
+                    ${icon("play", "h-4 w-4")}
+                  </span>
+                </span>
+              </div>
               <p class="truncate px-2.5 py-2 text-[11px] text-slate-400">${escapeHtml(item.filename)}</p>
             </button>
           `,
