@@ -175,7 +175,6 @@ COMFY_SHOW_CONSOLE = bool(CONFIG.get("comfy_show_console", False))
 # The HTTP server.
 SERVER_NAME = CONFIG["server_name"]
 SERVER_PORT = CONFIG["server_port"]
-SERVER_PUBLIC_ACCESS = bool(CONFIG.get("server_public_access", False))
 # Optional TLS. These default to configs/certs/{cert,key}.pem; generate a
 # certificate there (mkcert or openssl) to serve the dashboard over HTTPS.
 # When either file is absent the app falls back to HTTP. Browsers require a

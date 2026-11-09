@@ -341,7 +341,6 @@ General settings:
 - `comfy_show_console` — show ComfyUI in its own console window on Windows (default false)
 - `server_name` — interface to bind (`0.0.0.0` exposes the UI on the LAN)
 - `server_port` — port to serve on
-- `server_public_access` — kept for compatibility; public tunnels are not used by the built-in server
 - `server_ssl_certfile` — path to a TLS certificate (defaults to `configs/certs/cert.pem`)
 - `server_ssl_keyfile` — path to the matching TLS private key (defaults to `configs/certs/key.pem`)
 - `show_unmatched_node_inputs` - when true, node inputs that match no field definition are offered with a generic textbox / number / checkbox (default false)

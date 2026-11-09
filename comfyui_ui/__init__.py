@@ -10,7 +10,6 @@ from .config import (
     DEFAULT_WORKFLOW,
     SERVER_NAME,
     SERVER_PORT,
-    SERVER_PUBLIC_ACCESS,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "DEFAULT_WORKFLOW",
     "SERVER_NAME",
     "SERVER_PORT",
-    "SERVER_PUBLIC_ACCESS",
 ]
