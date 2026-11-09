@@ -41,15 +41,16 @@ export async function renderGallery(root, ctx, kind) {
   const refreshButton = root.querySelector("[data-refresh]");
 
   function skeleton() {
-    const className =
-      kind === "images"
-        ? "aspect-square"
-        : kind === "videos"
-          ? "aspect-video"
-          : "h-28";
-    return `<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      ${Array.from({ length: 8 })
-        .map(() => `<div class="skeleton ${className} rounded-2xl"></div>`)
+    if (kind === "audio") {
+      return `<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        ${Array.from({ length: 8 })
+          .map(() => `<div class="skeleton h-28 rounded-2xl"></div>`)
+          .join("")}
+      </div>`;
+    }
+    return `<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+      ${Array.from({ length: 10 })
+        .map(() => `<div class="skeleton aspect-square rounded-2xl"></div>`)
         .join("")}
     </div>`;
   }
@@ -141,31 +142,26 @@ export async function renderGallery(root, ctx, kind) {
       return;
     }
 
-    grid.innerHTML = `<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    grid.innerHTML = `<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
       ${items
         .map(
           (item, index) => `
-          <div class="card-soft overflow-hidden">
-            <button class="group relative block aspect-video w-full overflow-hidden bg-ink-950 text-left" data-video="${index}" title="${escapeHtml(item.filename)}">
-              ${
-                item.thumbnail_url
-                  ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />`
-                  : `<span class="flex h-full w-full items-center justify-center text-slate-600">${icon("film", "h-8 w-8")}</span>`
-              }
-              <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
-                <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm">
-                  ${icon("play", "h-5 w-5")}
-                </span>
+          <button class="gallery-tile group aspect-square text-left" data-video="${index}" title="${escapeHtml(item.filename)}">
+            ${
+              item.thumbnail_url
+                ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />`
+                : `<span class="flex h-full w-full items-center justify-center text-slate-600">${icon("film", "h-8 w-8")}</span>`
+            }
+            <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
+              <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm">
+                ${icon("play", "h-5 w-5")}
               </span>
-            </button>
-            <div class="flex items-center gap-3 p-3">
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-xs font-semibold text-slate-200">${escapeHtml(item.filename)}</p>
-                <p class="truncate text-[11px] text-slate-500">${escapeHtml(promptLabel(item) || "Generated video")}</p>
-              </div>
-              <a class="btn-ghost btn-xs shrink-0" href="${escapeHtml(item.url)}" download>${icon("download", "h-4 w-4")}</a>
-            </div>
-          </div>
+            </span>
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
+              <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(item.filename)}</span>
+              ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
+            </span>
+          </button>
         `,
         )
         .join("")}
