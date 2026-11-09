@@ -6,15 +6,25 @@ directly. This module only discovers the items; the HTTP layer in
 :mod:`comfyui_ui.server` streams the bytes.
 """
 
+import io
+import os
 from urllib.parse import urlencode
 
+from PIL import Image
+
 from .comfy_client import ComfyUIClient, is_video_filename
-from .config import COMFY_URL
+from .config import COMFY_URL, THUMBNAILS_DIR
 from .errors import AppError
 
 # Route on the app server that proxies a ComfyUI output file (images, audio and
 # video all use the same route).
 FILE_PROXY_ROUTE = "/api/gallery/file"
+# Route that serves a cached gallery thumbnail by its original filename.
+THUMBNAIL_ROUTE = "/api/gallery/thumbnail"
+
+# Longest edge of a gallery thumbnail, in pixels. Images are only ever shrunk,
+# never upscaled.
+THUMBNAIL_MAX_SIZE = (480, 480)
 
 
 def file_proxy_url(ref: dict) -> str:
@@ -25,6 +35,59 @@ def file_proxy_url(ref: dict) -> str:
         "type": ref.get("type", "output"),
     }
     return f"{FILE_PROXY_ROUTE}?" + urlencode(params)
+
+
+def thumbnail_path(filename: str) -> str | None:
+    """Return the local path of an image's cached thumbnail, if it has one."""
+    name = os.path.basename(filename or "")
+    if not name:
+        return None
+    return os.path.join(THUMBNAILS_DIR, name)
+
+
+def thumbnail_url(filename: str) -> str | None:
+    """Return the proxy URL for a cached thumbnail, or None if unavailable."""
+    path = thumbnail_path(filename)
+    if path and os.path.isfile(path):
+        return f"{THUMBNAIL_ROUTE}?" + urlencode(
+            {"filename": os.path.basename(filename)}
+        )
+    return None
+
+
+def save_image_thumbnail(filename: str, content: bytes) -> bool:
+    """Save a downscaled copy of an image using its original filename.
+
+    The file is written to :data:`config.THUMBNAILS_DIR`, so the gallery can
+    use it as a lightweight preview. Failures are reported by returning False
+    rather than raised: a missing thumbnail should never break generation.
+    """
+    path = thumbnail_path(filename)
+    if path is None:
+        return False
+
+    try:
+        os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+        with Image.open(io.BytesIO(content)) as source:
+            thumbnail = source.copy()
+        thumbnail.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
+
+        extension = os.path.splitext(path)[1].lower()
+        image_format = Image.registered_extensions().get(extension)
+        if image_format is None:
+            return False
+
+        options = {}
+        if image_format in ("JPEG", "WEBP"):
+            if thumbnail.mode not in ("RGB", "L"):
+                thumbnail = thumbnail.convert("RGB")
+            options["quality"] = 85
+        if image_format == "PNG":
+            options["optimize"] = True
+        thumbnail.save(path, format=image_format, **options)
+        return True
+    except Exception:  # noqa: BLE001 - thumbnails are best-effort
+        return False
 
 
 def _sorted_history(history: dict) -> list:
@@ -92,6 +155,9 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
                     "prompt": prompt_text,
                 }
                 ref["url"] = file_proxy_url(ref)
+                # Only images generated through OpenSail have a cached
+                # thumbnail; older ComfyUI history falls back to the full URL.
+                ref["thumbnail_url"] = thumbnail_url(ref["filename"])
                 images.append(ref)
     return images
 

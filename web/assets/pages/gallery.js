@@ -84,7 +84,7 @@ export async function renderGallery(root, ctx, kind) {
           .map(
             (item, index) => `
             <button class="gallery-tile group aspect-square text-left" data-image="${index}" title="${escapeHtml(item.filename)}">
-              <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+              <img src="${escapeHtml(item.thumbnail_url || item.url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
               <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
                 <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(item.filename)}</span>
                 ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}

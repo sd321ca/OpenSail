@@ -734,7 +734,7 @@ export async function renderGenerate(root, ctx) {
             (item, itemIndex) => `
             <button class="group overflow-hidden rounded-xl border border-subtle bg-raised text-left transition hover:border-accent-400/40 hover:bg-raised" data-gallery-item="${itemIndex}">
               <div class="aspect-square overflow-hidden bg-ink-950">
-                <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+                <img src="${escapeHtml(item.thumbnail_url || item.url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
               </div>
               <p class="truncate px-2.5 py-2 text-[11px] text-slate-400">${escapeHtml(item.filename)}</p>
             </button>

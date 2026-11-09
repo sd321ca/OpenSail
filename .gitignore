@@ -29,6 +29,9 @@ pnpm-debug.log*
 # Saved voice-cloning references (auto-generated, machine-specific)
 voices/
 
+# Cached image thumbnails used by the Image Gallery (auto-generated)
+thumbnails/
+
 # Locally generated TLS certificates / private keys
 configs/certs/*
 !configs/certs/.gitkeep

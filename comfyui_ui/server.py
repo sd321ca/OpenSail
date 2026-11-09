@@ -59,6 +59,7 @@ from .config import (
     MAX_IMAGE_INPUTS,
     SERVER_NAME,
     SERVER_PORT,
+    THUMBNAILS_DIR,
 )
 from .errors import AppError
 from .fields import (
@@ -71,6 +72,8 @@ from .gallery import (
     list_gallery_audio,
     list_gallery_images,
     list_gallery_videos,
+    save_image_thumbnail,
+    thumbnail_path,
 )
 from .models import CHAT_MODELS, DEFAULT_CHAT_MODEL_PATH
 from .notes import get_workflow_notes, save_workflow_notes
@@ -101,6 +104,7 @@ MEDIA_DIR = os.path.join(tempfile.gettempdir(), "opensail_media")
 UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "opensail_uploads")
 os.makedirs(MEDIA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
 # Long-lived backend managers. They start their subprocesses lazily.
 client = ComfyUIClient()
@@ -926,6 +930,13 @@ def _generate_events(body: GenerateBody):
             )
         else:
             image_ref = client.wait_for_image(prompt_id, client_id)
+            # Cache a downscaled copy for the Image Gallery's preview tiles.
+            # This is best-effort: a failure here must not fail generation.
+            try:
+                content, _content_type = client.fetch_image_bytes(image_ref)
+                save_image_thumbnail(image_ref.get("filename", ""), content)
+            except Exception:  # noqa: BLE001
+                pass
             yield _sse(
                 {
                     "type": "result",
@@ -981,6 +992,15 @@ def gallery_audio(limit: int = Query(200, ge=1, le=1000)) -> dict:
 @app.get("/api/gallery/videos")
 def gallery_videos(limit: int = Query(200, ge=1, le=1000)) -> dict:
     return {"items": list_gallery_videos(client, limit=limit)}
+
+
+@app.get("/api/gallery/thumbnail")
+def gallery_thumbnail(filename: str):
+    """Serve a cached gallery thumbnail by its original filename."""
+    path = thumbnail_path(filename)
+    if path is None or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Thumbnail not found.")
+    return FileResponse(path)
 
 
 @app.get("/api/gallery/file")

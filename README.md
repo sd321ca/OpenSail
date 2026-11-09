@@ -249,7 +249,9 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   press **Unload** to stop it and free VRAM before running a ComfyUI workflow.
 - **Image Gallery** — browse previously generated images pulled from ComfyUI's
   history. Use **Refresh** to reload and the slider to cap how many images are
-  loaded. Click a thumbnail to preview it full size.
+  loaded. Click a thumbnail to preview it full size. Images generated through
+  the Generate page get a downscaled copy in the `thumbnails/` folder (same
+  filename as the original), which the grid uses as its preview.
 - **Audio Gallery** — browse previously generated audio (e.g. songs) pulled
   from ComfyUI's history. Each file is shown as an inline audio player labelled
   with the generation metadata embedded in the file (style, mode, duration,

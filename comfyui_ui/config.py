@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKFLOWS_DIR = os.path.join(BASE_DIR, "workflows")
 CONFIGS_DIR = os.path.join(BASE_DIR, "configs")
+# Slow-loading image previews for the gallery are cached here, using the same
+# filename as the generated image.
+THUMBNAILS_DIR = os.path.join(BASE_DIR, "thumbnails")
 # Optional .env file at the project root, holding secrets such as the dashboard
 # login credentials. Values already present in the environment take priority.
 ENV_PATH = os.path.join(BASE_DIR, ".env")
