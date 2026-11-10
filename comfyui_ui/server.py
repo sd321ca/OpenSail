@@ -601,6 +601,7 @@ def bootstrap() -> dict:
         "chat_system_prompt": CHAT_SYSTEM_PROMPT,
         "chat_personas": get_personas(),
         "chat_loaded": chat_model.loaded,
+        "chat_model": chat_model.loaded_name,
         "chat_status": chat_model.status(),
         "audio_loaded": audio_model.loaded,
         "audio_status": audio_model.status(),
@@ -626,6 +627,7 @@ def status() -> dict:
             "comfy_managed": comfy_process.running,
             "comfy_configured": comfy_process.configured,
             "chat_loaded": chat_model.loaded,
+            "chat_model": chat_model.loaded_name,
             "audio_loaded": audio_model.loaded,
         }
     except requests.RequestException:
@@ -634,6 +636,7 @@ def status() -> dict:
             "comfy_managed": comfy_process.running,
             "comfy_configured": comfy_process.configured,
             "chat_loaded": chat_model.loaded,
+            "chat_model": chat_model.loaded_name,
             "audio_loaded": audio_model.loaded,
         }
 

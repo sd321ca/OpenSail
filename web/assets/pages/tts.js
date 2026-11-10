@@ -284,6 +284,7 @@ export async function renderTTS(root, ctx) {
       voices = data.voices || [];
       renderVoices();
       setStatus(data.status, data.loaded);
+      ctx.refreshStatus?.();
       toast("Audio model loaded.", "success");
     } catch (error) {
       toast(error.message, "error");
@@ -300,6 +301,7 @@ export async function renderTTS(root, ctx) {
       voices = [];
       renderVoices();
       setStatus(data.status, data.loaded);
+      ctx.refreshStatus?.();
       toast("audio.cpp server stopped.", "success");
     } catch (error) {
       toast(error.message, "error");
@@ -317,6 +319,7 @@ export async function renderTTS(root, ctx) {
       voices = data.voices || [];
       renderVoices();
       setStatus("audio.cpp server running.", true);
+      ctx.refreshStatus?.();
       toast(`Loaded ${voices.length} voice${voices.length === 1 ? "" : "s"}.`, "success");
     } catch (error) {
       toast(error.message, "error");
@@ -427,6 +430,7 @@ export async function renderTTS(root, ctx) {
     } finally {
       setRunning(false);
       controller = null;
+      ctx.refreshStatus?.();
     }
   }
 

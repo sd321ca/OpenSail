@@ -208,6 +208,13 @@ class ChatModel:
         """True while the server process is live."""
         return self._server is not None and self._server.poll() is None
 
+    @property
+    def loaded_name(self) -> str | None:
+        """Base name of the loaded GGUF file, or None when nothing is loaded."""
+        if not self.loaded or not self._loaded_path:
+            return None
+        return os.path.basename(self._loaded_path)
+
     def status(self) -> str:
         """A short human-readable status line for the Chat view."""
         if not self.loaded:

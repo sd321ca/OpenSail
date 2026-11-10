@@ -102,9 +102,10 @@ warnings, use mkcert or a publicly trusted certificate instead.
 
 ### Starting and stopping ComfyUI
 
-The sidebar's **Start**/**Stop** buttons manage a local ComfyUI process. Set
-`comfy_dir` in `configs/constants.json` to the portable install folder (the one
-containing `python_embeded` and `ComfyUI`). The app then launches:
+The sidebar's **Local services** panel shows ComfyUI, the chat model, and the
+audio.cpp server. Its **Start**/**Stop** buttons manage a local ComfyUI process.
+Set `comfy_dir` in `configs/constants.json` to the portable install folder (the
+one containing `python_embeded` and `ComfyUI`). The app then launches:
 
 ```text
 python_embeded/python.exe -s ComfyUI/main.py <comfy_start_args>

@@ -884,6 +884,7 @@ export async function renderChat(root, ctx) {
         body: { path: modelSelect.value },
       });
       setModelStatus(result.status, result.loaded);
+      ctx.refreshStatus?.();
       toast("Chat model loaded.", "success");
     } catch (error) {
       toast(error.message, "error");
@@ -898,6 +899,7 @@ export async function renderChat(root, ctx) {
     try {
       const result = await api("/api/chat/unload", { method: "POST" });
       setModelStatus(result.status, result.loaded);
+      ctx.refreshStatus?.();
       toast("Chat model unloaded.", "success");
     } catch (error) {
       toast(error.message, "error");
@@ -982,6 +984,7 @@ export async function renderChat(root, ctx) {
             setPhase(event.message);
           } else if (event.type === "model") {
             setModelStatus(event.status, event.loaded);
+            ctx.refreshStatus?.();
           } else if (event.type === "chunk") {
             assistant.content = event.text;
             updateStreamingMessage(assistant);

@@ -89,40 +89,112 @@
 
       <div class="border-t border-subtle p-3">
         <div class="rounded-xl border border-subtle bg-raised p-3">
-          <div
-            class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500"
+          <p
+            class="text-[11px] font-semibold uppercase tracking-wider text-slate-500"
           >
-            <span
-              id="comfy-dot"
-              class="h-1.5 w-1.5 rounded-full bg-amber-400"
-            ></span>
-            ComfyUI
-          </div>
-          <p id="comfy-url" class="mt-1.5 truncate text-xs text-slate-400">
-            Checking connection…
+            Local services
           </p>
-          <p id="comfy-state" class="mt-1 text-[11px] text-slate-500">
-            Checking…
-          </p>
-          <div class="mt-2 flex items-center gap-2">
-            <button
-              id="comfy-start"
-              type="button"
-              class="btn-secondary btn-xs flex-1"
-              title="Start ComfyUI"
-              disabled
-            >
-              Start
-            </button>
-            <button
-              id="comfy-stop"
-              type="button"
-              class="btn-ghost btn-xs flex-1"
-              title="Stop the ComfyUI process started by OpenSail"
-              disabled
-            >
-              Stop
-            </button>
+          <div class="mt-2.5 space-y-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <span
+                  id="comfy-dot"
+                  class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+                ></span>
+                <span class="text-xs font-medium text-slate-300">ComfyUI</span>
+                <span id="comfy-badge" class="ml-auto text-[11px] text-slate-500">
+                  Checking…
+                </span>
+              </div>
+              <p
+                id="comfy-url"
+                class="mt-1 truncate pl-3.5 text-[11px] text-slate-500"
+              >
+                Checking connection…
+              </p>
+              <div class="mt-1.5 flex items-center gap-1.5 pl-3.5">
+                <button
+                  id="comfy-start"
+                  type="button"
+                  class="btn-secondary btn-xs flex-1"
+                  title="Start ComfyUI"
+                  disabled
+                >
+                  Start
+                </button>
+                <button
+                  id="comfy-stop"
+                  type="button"
+                  class="btn-ghost btn-xs flex-1"
+                  title="Stop the ComfyUI process started by OpenSail"
+                  disabled
+                >
+                  Stop
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center gap-2">
+                <span
+                  id="chat-dot"
+                  class="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500"
+                ></span>
+                <span class="text-xs font-medium text-slate-300">Chat</span>
+                <span id="chat-badge" class="ml-auto text-[11px] text-slate-500">
+                  Checking…
+                </span>
+              </div>
+              <div class="mt-1 flex items-center gap-1.5 pl-3.5">
+                <p
+                  id="chat-detail"
+                  class="min-w-0 flex-1 truncate text-[11px] text-slate-500"
+                >
+                  Checking…
+                </p>
+                <button
+                  id="chat-unload"
+                  type="button"
+                  class="btn-ghost btn-xs"
+                  title="Unload the chat model"
+                  disabled
+                >
+                  Unload
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center gap-2">
+                <span
+                  id="audio-dot"
+                  class="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500"
+                ></span>
+                <span class="text-xs font-medium text-slate-300">
+                  Text to speech
+                </span>
+                <span id="audio-badge" class="ml-auto text-[11px] text-slate-500">
+                  Checking…
+                </span>
+              </div>
+              <div class="mt-1 flex items-center gap-1.5 pl-3.5">
+                <p
+                  id="audio-detail"
+                  class="min-w-0 flex-1 truncate text-[11px] text-slate-500"
+                >
+                  Checking…
+                </p>
+                <button
+                  id="audio-unload"
+                  type="button"
+                  class="btn-ghost btn-xs"
+                  title="Stop the audio.cpp server"
+                  disabled
+                >
+                  Unload
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

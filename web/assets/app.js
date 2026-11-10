@@ -70,6 +70,8 @@ const state = {
   page: null,
   cleanup: null,
   comfyBusy: false,
+  chatBusy: false,
+  audioBusy: false,
 };
 
 /* ------------------------------------------------------------------ */
@@ -131,6 +133,7 @@ const ctx = {
   },
   api,
   toast,
+  refreshStatus: () => refreshConnectionStatus(),
   navigate: (page) => {
     window.location.hash = `#${page}`;
   },
@@ -222,11 +225,33 @@ async function navigate() {
 /* Connection status                                                   */
 /* ------------------------------------------------------------------ */
 
+const SERVICE_TONES = {
+  ok: { dot: "bg-emerald-400", text: "text-emerald-300" },
+  warn: { dot: "bg-amber-400", text: "text-amber-300" },
+  error: { dot: "bg-rose-400", text: "text-rose-300" },
+  idle: { dot: "bg-slate-500", text: "text-slate-500" },
+};
+
+function updateServiceRow(key, { tone, label, detail, action = false }) {
+  const colors = SERVICE_TONES[tone] || SERVICE_TONES.idle;
+  const dot = document.getElementById(`${key}-dot`);
+  const badge = document.getElementById(`${key}-badge`);
+  const detailEl = document.getElementById(`${key}-detail`);
+  const button = document.getElementById(`${key}-unload`);
+
+  if (dot) dot.className = `h-1.5 w-1.5 shrink-0 rounded-full ${colors.dot}`;
+  if (badge) {
+    badge.textContent = label;
+    badge.className = `ml-auto text-[11px] ${colors.text}`;
+  }
+  if (detailEl && detail !== undefined) detailEl.textContent = detail;
+  if (button) button.disabled = !action;
+}
+
 function updateComfyControls({ connected, managed, configured }) {
   const start = document.getElementById("comfy-start");
   const stop = document.getElementById("comfy-stop");
-  const label = document.getElementById("comfy-state");
-  if (!start || !stop || !label) return;
+  if (!start || !stop) return;
 
   start.disabled = state.comfyBusy || connected || managed || !configured;
   start.title = !configured
@@ -240,69 +265,173 @@ function updateComfyControls({ connected, managed, configured }) {
     ? "Stop the ComfyUI process started by OpenSail"
     : "ComfyUI was not started by OpenSail";
 
-  label.textContent = connected
-    ? managed
-      ? "Managed by OpenSail"
-      : "Running outside OpenSail"
-    : managed
-      ? "Starting…"
-      : configured
-        ? "Not running"
-        : "Not configured";
-  label.className = `mt-1 text-[11px] ${
-    connected ? "text-emerald-300" : "text-slate-500"
-  }`;
+  let tone = "idle";
+  let label = "Not configured";
+  if (connected) {
+    tone = "ok";
+    label = "Connected";
+  } else if (managed) {
+    tone = "warn";
+    label = "Starting…";
+  } else if (configured) {
+    tone = "error";
+    label = "Not running";
+  }
+  updateServiceRow("comfy", { tone, label });
+
+  const badge = document.getElementById("comfy-badge");
+  if (badge) {
+    badge.title = connected
+      ? managed
+        ? "Started by OpenSail"
+        : "Running outside OpenSail"
+      : "";
+  }
+}
+
+function updateChatRow({ loaded, model }) {
+  if (!state.boot?.chat_models?.length) {
+    updateServiceRow("chat", {
+      tone: "idle",
+      label: "Not configured",
+      detail: "No chat models configured",
+    });
+    return;
+  }
+  if (loaded) {
+    updateServiceRow("chat", {
+      tone: "ok",
+      label: "Loaded",
+      detail: model || "Chat model loaded",
+      action: !state.chatBusy,
+    });
+  } else {
+    updateServiceRow("chat", {
+      tone: "idle",
+      label: "Idle",
+      detail: "No model loaded",
+    });
+  }
+}
+
+function updateAudioRow({ loaded }) {
+  if (!state.boot?.tts_models?.length) {
+    updateServiceRow("audio", {
+      tone: "idle",
+      label: "Not configured",
+      detail: "No speech models configured",
+    });
+    return;
+  }
+  if (loaded) {
+    updateServiceRow("audio", {
+      tone: "ok",
+      label: "Running",
+      detail: "audio.cpp server",
+      action: !state.audioBusy,
+    });
+  } else {
+    updateServiceRow("audio", {
+      tone: "idle",
+      label: "Idle",
+      detail: "audio.cpp server stopped",
+    });
+  }
+}
+
+function updateConnectionChip({ connected = false, managed = false, unreachable = false }) {
+  const chip = document.getElementById("connection-chip");
+  if (!chip) return;
+
+  let color = "bg-rose-400";
+  let label = "ComfyUI offline";
+  let variant = "chip-danger";
+  if (unreachable) {
+    label = "Server unreachable";
+  } else if (connected) {
+    color = "bg-emerald-400";
+    label = "ComfyUI connected";
+    variant = "chip-success";
+  } else if (managed) {
+    color = "bg-amber-400";
+    label = "ComfyUI starting";
+    variant = "chip-warn";
+  }
+  chip.className = `chip hidden sm:inline-flex ${variant}`;
+  chip.innerHTML = `<span class="h-1.5 w-1.5 rounded-full ${color}"></span><span>${label}</span>`;
 }
 
 function applyBootStatus() {
   const boot = state.boot;
   if (!boot) return;
-  document.getElementById("comfy-url").textContent =
-    boot.comfy_url || "Unknown";
+  document.getElementById("comfy-url").textContent = boot.comfy_url || "Unknown";
   updateComfyControls({
     connected: Boolean(boot.comfy_managed),
     managed: Boolean(boot.comfy_managed),
     configured: Boolean(boot.comfy_configured),
   });
+  updateChatRow({
+    loaded: Boolean(boot.chat_loaded),
+    model: boot.chat_model,
+  });
+  updateAudioRow({ loaded: Boolean(boot.audio_loaded) });
 }
 
 async function refreshConnectionStatus() {
-  const dot = document.getElementById("comfy-dot");
-  const chip = document.getElementById("connection-chip");
   try {
     const status = await api("/api/status");
     const connected = Boolean(status.comfy);
     const managed = Boolean(status.comfy_managed);
-    const color = connected
-      ? "bg-emerald-400"
-      : managed
-        ? "bg-amber-400"
-        : "bg-rose-400";
-    const label = connected
-      ? "ComfyUI connected"
-      : managed
-        ? "ComfyUI starting"
-        : "ComfyUI offline";
-    dot.className = `h-1.5 w-1.5 rounded-full ${color}`;
-    chip.className = `chip hidden sm:inline-flex ${
-      connected ? "chip-success" : managed ? "chip-warn" : "chip-danger"
-    }`;
-    chip.innerHTML = `<span class="h-1.5 w-1.5 rounded-full ${color}"></span><span>${label}</span>`;
+    updateConnectionChip({ connected, managed });
     updateComfyControls({
       connected,
       managed,
       configured: Boolean(status.comfy_configured),
     });
+    updateChatRow({
+      loaded: Boolean(status.chat_loaded),
+      model: status.chat_model,
+    });
+    updateAudioRow({ loaded: Boolean(status.audio_loaded) });
   } catch (_error) {
-    dot.className = "h-1.5 w-1.5 rounded-full bg-rose-400";
-    chip.className = "chip chip-danger hidden sm:inline-flex";
-    chip.innerHTML =
-      '<span class="h-1.5 w-1.5 rounded-full bg-rose-400"></span><span>Server unreachable</span>';
+    updateConnectionChip({ unreachable: true });
     updateComfyControls({
       connected: false,
       managed: false,
       configured: Boolean(state.boot?.comfy_configured),
     });
+  }
+}
+
+async function unloadChat() {
+  const button = document.getElementById("chat-unload");
+  state.chatBusy = true;
+  setButtonBusy(button, true, "Unloading…");
+  try {
+    const result = await api("/api/chat/unload", { method: "POST" });
+    toast(result.status || "Chat model unloaded.", "success");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    state.chatBusy = false;
+    setButtonBusy(button, false);
+    await refreshConnectionStatus();
+  }
+}
+
+async function unloadAudio() {
+  const button = document.getElementById("audio-unload");
+  state.audioBusy = true;
+  setButtonBusy(button, true, "Stopping…");
+  try {
+    const result = await api("/api/audio/unload", { method: "POST" });
+    toast(result.status || "audio.cpp server stopped.", "success");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    state.audioBusy = false;
+    setButtonBusy(button, false);
+    await refreshConnectionStatus();
   }
 }
 
@@ -359,6 +488,8 @@ async function boot() {
     .addEventListener("click", () => setSidebar(false));
   document.getElementById("comfy-start").addEventListener("click", startComfy);
   document.getElementById("comfy-stop").addEventListener("click", stopComfy);
+  document.getElementById("chat-unload").addEventListener("click", unloadChat);
+  document.getElementById("audio-unload").addEventListener("click", unloadAudio);
 
   window.addEventListener("hashchange", () => {
     state.cleanup?.();
