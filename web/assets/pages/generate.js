@@ -1,5 +1,6 @@
 import { api, stream, uploadFile } from "../api.js";
 import {
+  clamp,
   confirmDialog,
   emptyState,
   escapeHtml,
@@ -534,7 +535,7 @@ export async function renderGenerate(root, ctx) {
         <div class="space-y-3">
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Input images</h3>
-            <span class="text-[11px] text-slate-600">Upload, sketch or pick from the gallery</span>
+            <span class="text-[11px] text-slate-600">Upload, crop, sketch or pick from the gallery</span>
           </div>
           <div class="grid gap-3 sm:grid-cols-2">
             ${config.image_nodes.map((node, index) => imageSlotHtml(node, index)).join("")}
@@ -586,6 +587,7 @@ export async function renderGenerate(root, ctx) {
         if (file) uploadImageRef(file, index);
       });
       slot.querySelector("[data-image-sketch]")?.addEventListener("click", () => openSketch(index));
+      slot.querySelector("[data-image-crop]")?.addEventListener("click", () => openCrop(index));
       slot.querySelector("[data-image-gallery]")?.addEventListener("click", () => openImageGallery(index));
       slot.querySelector("[data-image-clear]")?.addEventListener("click", () => {
         state.images[index] = null;
@@ -635,6 +637,7 @@ export async function renderGenerate(root, ctx) {
             <input type="file" accept="image/*" class="sr-only" data-image-upload />
           </label>
           <button class="btn-ghost btn-xs" data-image-sketch>${icon("pencil", "h-3.5 w-3.5")} Sketch</button>
+          ${ref ? `<button class="btn-ghost btn-xs" data-image-crop>${icon("crop", "h-3.5 w-3.5")} Crop</button>` : ""}
           <button class="btn-ghost btn-xs" data-image-gallery>${icon("gallery", "h-3.5 w-3.5")} Gallery</button>
           ${ref ? `<button class="btn-ghost btn-xs text-rose-300 hover:bg-rose-500/10" data-image-clear>${icon("trash", "h-3.5 w-3.5")}</button>` : ""}
         </div>
@@ -970,6 +973,285 @@ export async function renderGenerate(root, ctx) {
           setButtonBusy(button, false);
         }
       }, "image/png");
+    });
+  }
+
+  function openCrop(index) {
+    const ref = state.images[index];
+    if (!ref?.previewUrl) {
+      toast("Choose an image first.", "warning");
+      return;
+    }
+
+    let onResize = null;
+    const modal = openModal({
+      title: "Crop an input image",
+      subtitle:
+        "Drag the box to move it, or its handles to resize. Dimensions are rounded to multiples of 8.",
+      size: "lg",
+      onClose: () => {
+        if (onResize) window.removeEventListener("resize", onResize);
+      },
+      content: `
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-3 rounded-xl border border-subtle bg-raised px-3 py-2">
+            <span class="min-w-0 truncate text-[11px] text-slate-500">Source: ${escapeHtml(ref.name || "image")}</span>
+            <span class="shrink-0 font-mono text-[11px] text-slate-400" data-crop-size>—</span>
+          </div>
+          <div class="flex items-center justify-center rounded-xl border border-subtle bg-ink-950 p-2">
+            <div class="relative inline-block max-w-full touch-none select-none" data-crop-stage>
+              <img src="${escapeHtml(ref.previewUrl)}" alt="Image to crop" draggable="false" class="block max-h-[62vh] max-w-full" data-crop-image />
+              <div class="pointer-events-none absolute bg-black/60" data-shade="n"></div>
+              <div class="pointer-events-none absolute bg-black/60" data-shade="s"></div>
+              <div class="pointer-events-none absolute bg-black/60" data-shade="w"></div>
+              <div class="pointer-events-none absolute bg-black/60" data-shade="e"></div>
+              <div class="absolute border-2 border-white/90" data-crop-box>
+                <span class="absolute inset-0 cursor-move" data-handle="move"></span>
+                <span class="absolute left-0 top-0 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize rounded-sm border border-black/40 bg-white shadow" data-handle="nw"></span>
+                <span class="absolute left-1/2 top-0 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-sm border border-black/40 bg-white shadow" data-handle="n"></span>
+                <span class="absolute left-full top-0 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-nesw-resize rounded-sm border border-black/40 bg-white shadow" data-handle="ne"></span>
+                <span class="absolute left-full top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-black/40 bg-white shadow" data-handle="e"></span>
+                <span class="absolute left-full top-full h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize rounded-sm border border-black/40 bg-white shadow" data-handle="se"></span>
+                <span class="absolute left-1/2 top-full h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-sm border border-black/40 bg-white shadow" data-handle="s"></span>
+                <span class="absolute left-0 top-full h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-nesw-resize rounded-sm border border-black/40 bg-white shadow" data-handle="sw"></span>
+                <span class="absolute left-0 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-black/40 bg-white shadow" data-handle="w"></span>
+              </div>
+            </div>
+          </div>
+          <p class="text-[11px] leading-5 text-slate-500">
+            The cropped image replaces the selected one in this slot. Crop it again to adjust the result.
+          </p>
+        </div>
+      `,
+      footer: `
+        <div class="flex w-full items-center justify-end gap-2">
+          <button class="btn-secondary" data-crop-cancel>Cancel</button>
+          <button class="btn-primary" data-crop-apply>${icon("check", "h-4 w-4")} Use crop</button>
+        </div>
+      `,
+    });
+
+    const img = modal.element.querySelector("[data-crop-image]");
+    const box = modal.element.querySelector("[data-crop-box]");
+    const sizeLabel = modal.element.querySelector("[data-crop-size]");
+    const applyButton = modal.element.querySelector("[data-crop-apply]");
+    const shades = {
+      n: modal.element.querySelector('[data-shade="n"]'),
+      s: modal.element.querySelector('[data-shade="s"]'),
+      w: modal.element.querySelector('[data-shade="w"]'),
+      e: modal.element.querySelector('[data-shade="e"]'),
+    };
+
+    // The selection is stored as fractions of the image so it survives a
+    // viewport resize; the crop itself is computed from the natural pixels.
+    let selection = null;
+    let drag = null;
+
+    const displaySize = () => {
+      const rect = img.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    };
+
+    const minSize = (dw, dh) => ({
+      width: Math.min(0.5, 24 / Math.max(1, dw)),
+      height: Math.min(0.5, 24 / Math.max(1, dh)),
+    });
+
+    function naturalRect() {
+      if (!selection || !img.naturalWidth || !img.naturalHeight) return null;
+      const nw = img.naturalWidth;
+      const nh = img.naturalHeight;
+      const width = clamp(Math.round((selection.width * nw) / 8) * 8, 8, nw);
+      const height = clamp(Math.round((selection.height * nh) / 8) * 8, 8, nh);
+      const x = clamp(Math.round(selection.x * nw), 0, nw - width);
+      const y = clamp(Math.round(selection.y * nh), 0, nh - height);
+      return { x, y, width, height };
+    }
+
+    function render() {
+      if (!selection) return;
+      const left = selection.x * 100;
+      const top = selection.y * 100;
+      const width = selection.width * 100;
+      const height = selection.height * 100;
+
+      box.style.left = `${left}%`;
+      box.style.top = `${top}%`;
+      box.style.width = `${width}%`;
+      box.style.height = `${height}%`;
+
+      Object.assign(shades.n.style, {
+        left: "0%",
+        top: "0%",
+        width: "100%",
+        height: `${top}%`,
+      });
+      Object.assign(shades.s.style, {
+        left: "0%",
+        top: `${top + height}%`,
+        width: "100%",
+        bottom: "0",
+      });
+      Object.assign(shades.w.style, {
+        left: "0%",
+        top: `${top}%`,
+        width: `${left}%`,
+        height: `${height}%`,
+      });
+      Object.assign(shades.e.style, {
+        left: `${left + width}%`,
+        top: `${top}%`,
+        right: "0",
+        height: `${height}%`,
+      });
+
+      const rect = naturalRect();
+      if (rect && sizeLabel) sizeLabel.textContent = `${rect.width} × ${rect.height}`;
+    }
+
+    function initialize() {
+      const { width: dw, height: dh } = displaySize();
+      if (!dw || !dh) return;
+      const side = Math.min(dw, dh) * 0.8;
+      selection = {
+        x: (dw - side) / 2 / dw,
+        y: (dh - side) / 2 / dh,
+        width: side / dw,
+        height: side / dh,
+      };
+      render();
+    }
+
+    function selectionFrom(mode, start, dx, dy) {
+      const { width: dw, height: dh } = displaySize();
+      if (!dw || !dh) return start;
+      const minimum = minSize(dw, dh);
+      const next = { ...start };
+      const fx = dx / dw;
+      const fy = dy / dh;
+
+      if (mode === "move") {
+        next.x = clamp(start.x + fx, 0, 1 - start.width);
+        next.y = clamp(start.y + fy, 0, 1 - start.height);
+        return next;
+      }
+
+      let left = start.x;
+      let top = start.y;
+      let right = start.x + start.width;
+      let bottom = start.y + start.height;
+      if (mode.includes("w")) left = clamp(left + fx, 0, Math.max(0, right - minimum.width));
+      if (mode.includes("e")) right = clamp(right + fx, Math.min(1, left + minimum.width), 1);
+      if (mode.includes("n")) top = clamp(top + fy, 0, Math.max(0, bottom - minimum.height));
+      if (mode.includes("s")) bottom = clamp(bottom + fy, Math.min(1, top + minimum.height), 1);
+
+      next.x = left;
+      next.y = top;
+      next.width = right - left;
+      next.height = bottom - top;
+      return next;
+    }
+
+    box.querySelectorAll("[data-handle]").forEach((handle) => {
+      handle.addEventListener("pointerdown", (event) => {
+        if (!selection) return;
+        event.preventDefault();
+        event.stopPropagation();
+        handle.setPointerCapture(event.pointerId);
+        drag = {
+          mode: handle.dataset.handle,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          selection: { ...selection },
+        };
+      });
+      handle.addEventListener("pointermove", (event) => {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        selection = selectionFrom(
+          drag.mode,
+          drag.selection,
+          event.clientX - drag.startX,
+          event.clientY - drag.startY,
+        );
+        render();
+      });
+      const finish = (event) => {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        drag = null;
+      };
+      handle.addEventListener("pointerup", finish);
+      handle.addEventListener("pointercancel", finish);
+    });
+
+    onResize = () => render();
+    window.addEventListener("resize", onResize);
+
+    const start = () => requestAnimationFrame(initialize);
+    if (img.complete && img.naturalWidth > 0) start();
+    else img.addEventListener("load", start, { once: true });
+    img.addEventListener("error", () => {
+      if (sizeLabel) sizeLabel.textContent = "Image unavailable";
+      if (applyButton) applyButton.disabled = true;
+    });
+
+    modal.element
+      .querySelector("[data-crop-cancel]")
+      ?.addEventListener("click", () => modal.close());
+
+    const mimeType = /\.(jpe?g)$/i.test(ref.name || "")
+      ? "image/jpeg"
+      : "image/png";
+
+    applyButton.addEventListener("click", () => {
+      const rect = naturalRect();
+      if (!rect) {
+        toast("The image is still loading.", "warning");
+        return;
+      }
+      setButtonBusy(applyButton, true, "Cropping…");
+      const canvas = document.createElement("canvas");
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(
+        img,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        0,
+        0,
+        rect.width,
+        rect.height,
+      );
+      canvas.toBlob(
+        async (blob) => {
+          if (!blob) {
+            setButtonBusy(applyButton, false);
+            toast("Could not export the crop.", "error");
+            return;
+          }
+          const extension = mimeType === "image/jpeg" ? "jpg" : "png";
+          try {
+            const file = new File([blob], `crop.${extension}`, { type: mimeType });
+            const stored = await uploadFile(file);
+            state.images[index] = {
+              upload: stored.id,
+              previewUrl: stored.url,
+              name: stored.name || `crop.${extension}`,
+            };
+            modal.close();
+            renderMedia();
+            toast("Crop applied.", "success");
+          } catch (error) {
+            toast(error.message, "error");
+            setButtonBusy(applyButton, false);
+          }
+        },
+        mimeType,
+        mimeType === "image/jpeg" ? 0.92 : undefined,
+      );
     });
   }
 

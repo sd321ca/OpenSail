@@ -225,9 +225,9 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
     output a video player.
   - Workflows with `LoadImage` nodes (e.g. `Image Edit - 1 Input.json`) show
     one **Input images** slot per node. Each slot is an image editor, so you
-    can upload a file **or draw a sketch** to use as the input image, or press
-    **Load from Gallery** beside the slot to pick one of the images you have
-    already generated (press **Use this image** under a thumbnail).
+    can upload a file, **draw a sketch**, or **crop** the selected image, or
+    press **Load from Gallery** beside the slot to pick one of the images you
+    have already generated (press **Use this image** under a thumbnail).
   - Workflows with a `LoadVideo` node (e.g. `Extract Last Frame.json` or
     `Video - Upscale.json`) show an **Input video** upload. The file is sent to
     ComfyUI and used as that node's video before the workflow runs. Press
@@ -292,7 +292,8 @@ detects the workflow kind automatically:
 - Workflows with a `LoadVideo` node (e.g. `Extract Last Frame.json`) show an
   **Input video** upload. The uploaded file replaces the node's `file` input.
 - Workflows with a `LoadImage` node show one **Input images** slot per node,
-  where you can upload an image, draw a sketch, or load one from the gallery.
+  where you can upload an image, draw a sketch, crop the selected image, or
+  load one from the gallery.
 - Video workflows expose the `RandomNoise` seed, the `BasicScheduler` steps /
   scheduler, and the `PrimitiveFloat` duration `value` as node candidates.
 
