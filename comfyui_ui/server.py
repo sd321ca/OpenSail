@@ -685,7 +685,7 @@ def status() -> dict:
 
 @app.post("/history")
 def clear_history() -> dict:
-    """Clear ComfyUI's generation history."""
+    """Clear ComfyUI's generation history and the last-run dashboard state."""
     try:
         response = requests.post(
             f"{COMFY_URL.rstrip('/')}/history",
@@ -695,6 +695,23 @@ def clear_history() -> dict:
         response.raise_for_status()
     except requests.RequestException as exc:
         raise AppError(f"Could not clear ComfyUI history: {exc}") from exc
+
+    # The Generate page restores the workflow and output of the most recent
+    # run from this snapshot. Clearing history should also forget that run so
+    # it is not reopened afterwards. Leave an in-flight generation untouched.
+    with _generation_lock:
+        if not _generation_state["running"]:
+            _generation_state.update(
+                {
+                    "id": None,
+                    "workflow": None,
+                    "progress": None,
+                    "result": None,
+                    "error": "",
+                    "started_at": 0.0,
+                    "finished_at": 0.0,
+                }
+            )
     return {"status": "History cleared."}
 
 

@@ -135,7 +135,7 @@ function applyJobSnapshot(snapshot) {
   const elapsed = Number(snapshot.elapsed_ms) || 0;
 
   job.running = Boolean(snapshot.running);
-  if (snapshot.workflow) job.workflow = snapshot.workflow;
+  job.workflow = snapshot.workflow || null;
   job.error = snapshot.error || "";
   job.result = snapshot.result || null;
   if (snapshot.progress) {
@@ -144,6 +144,8 @@ function applyJobSnapshot(snapshot) {
       message: snapshot.progress.message || "",
       indeterminate: Boolean(snapshot.progress.indeterminate),
     };
+  } else {
+    job.progress = null;
   }
 
   if (job.running) {
