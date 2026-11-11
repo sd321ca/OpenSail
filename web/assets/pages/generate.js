@@ -1,4 +1,4 @@
-import { api, stream, uploadFile } from "../api.js";
+import { api, uploadFile } from "../api.js";
 import {
   clamp,
   confirmDialog,
@@ -57,10 +57,216 @@ function refPayload(ref) {
   return null;
 }
 
+/* A run belongs to the server, not to the Generate page. The dashboard polls
+   the job status, so navigating away, reloading, or turning the phone screen
+   off all resume the progress bar instead of losing the run. */
+const job = {
+  running: false,
+  result: null,
+  error: "",
+  progress: null,
+  workflow: null,
+  startedAt: 0,
+  elapsedMs: 0,
+  doneAt: 0,
+  listeners: new Set(),
+};
+
+const JOB_POLL_INTERVAL = 500;
+let pollTimer = null;
+let pollInFlight = false;
+
+function jobElapsed() {
+  return job.running && job.startedAt
+    ? performance.now() - job.startedAt
+    : job.elapsedMs;
+}
+
+function jobSnapshot() {
+  return {
+    running: job.running,
+    result: job.result,
+    error: job.error,
+    progress: job.progress,
+    workflow: job.workflow,
+    elapsedMs: jobElapsed(),
+    doneAt: job.doneAt,
+  };
+}
+
+function notifyJob() {
+  const snapshot = jobSnapshot();
+  for (const listener of [...job.listeners]) {
+    try {
+      listener(snapshot);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+}
+
+function subscribeJob(listener) {
+  job.listeners.add(listener);
+  listener(jobSnapshot());
+  return () => job.listeners.delete(listener);
+}
+
+function finishJob() {
+  if (job.startedAt) {
+    job.elapsedMs = performance.now() - job.startedAt;
+    job.startedAt = 0;
+  }
+  job.running = false;
+}
+
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
+function schedulePoll(delay = JOB_POLL_INTERVAL) {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollJob, delay);
+}
+
+function applyJobSnapshot(snapshot) {
+  const wasRunning = job.running;
+  const previousError = job.error;
+  const elapsed = Number(snapshot.elapsed_ms) || 0;
+
+  job.running = Boolean(snapshot.running);
+  if (snapshot.workflow) job.workflow = snapshot.workflow;
+  job.error = snapshot.error || "";
+  job.result = snapshot.result || null;
+  if (snapshot.progress) {
+    job.progress = {
+      value: snapshot.progress.value,
+      message: snapshot.progress.message || "",
+      indeterminate: Boolean(snapshot.progress.indeterminate),
+    };
+  }
+
+  if (job.running) {
+    // Re-base the local clock on the server's elapsed time so a suspended or
+    // reloaded page shows the real duration rather than restarting at zero.
+    job.startedAt = performance.now() - elapsed;
+    job.elapsedMs = elapsed;
+    job.doneAt = 0;
+  } else {
+    job.startedAt = 0;
+    job.elapsedMs = elapsed;
+    if (!job.error && job.result) {
+      job.progress = { value: 1, message: "Done.", indeterminate: false };
+      if (wasRunning) job.doneAt = performance.now();
+    } else {
+      job.doneAt = 0;
+    }
+  }
+
+  if (wasRunning && job.error && job.error !== previousError) {
+    toast(
+      job.error,
+      job.error === "Generation cancelled." ? "warning" : "error",
+    );
+  }
+
+  notifyJob();
+  if (job.running) schedulePoll();
+  else stopPolling();
+}
+
+async function pollJob() {
+  pollTimer = null;
+  if (!job.running) return;
+  if (pollInFlight) {
+    schedulePoll();
+    return;
+  }
+  pollInFlight = true;
+  try {
+    applyJobSnapshot(await api("/api/generate/status"));
+  } catch (_error) {
+    // A phone dropping the request while its screen is off is expected: keep
+    // the last progress visible and try again. The job runs on the server.
+    if (job.running) schedulePoll(JOB_POLL_INTERVAL * 2);
+  } finally {
+    pollInFlight = false;
+  }
+}
+
+async function refreshJob() {
+  if (pollInFlight) {
+    schedulePoll(0);
+    return jobSnapshot();
+  }
+  pollInFlight = true;
+  try {
+    applyJobSnapshot(await api("/api/generate/status"));
+  } catch (_error) {
+    // Leave the local state untouched if the server is unavailable, but keep
+    // retrying when a run is still live on the server.
+    if (job.running) schedulePoll(JOB_POLL_INTERVAL * 2);
+  } finally {
+    pollInFlight = false;
+  }
+  return jobSnapshot();
+}
+
+async function startGeneration(payload) {
+  stopPolling();
+  job.running = true;
+  job.result = null;
+  job.error = "";
+  job.workflow = payload.workflow || null;
+  job.progress = { value: 0, message: "Preparing…", indeterminate: true };
+  job.startedAt = performance.now();
+  job.elapsedMs = 0;
+  job.doneAt = 0;
+  notifyJob();
+
+  try {
+    applyJobSnapshot(
+      await api("/api/generate", { method: "POST", body: payload }),
+    );
+  } catch (error) {
+    if (error.status === 409) {
+      // Another run is already live (for example after a rapid reload);
+      // attach to it instead of reporting a failure.
+      try {
+        applyJobSnapshot(await api("/api/generate/status"));
+        return;
+      } catch (_statusError) {
+        // Fall through to the error below.
+      }
+    }
+    job.error = error.message || "Generation failed.";
+    finishJob();
+    toast(job.error, "error");
+    notifyJob();
+  }
+}
+
+// Mobile browsers freeze timers while the screen is off. Catch up as soon as
+// the page is visible again instead of waiting for the next scheduled poll.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    refreshJob();
+  }
+});
+
 export async function renderGenerate(root, ctx) {
+  // Recover a run that outlived this page (navigation, reload, phone screen
+  // off) before choosing which workflow to show.
+  await refreshJob();
+
   const workflows = ctx.boot.workflows || [];
   let config = null;
   let workflow = ctx.boot.default_workflow || workflows[0]?.name || null;
+  // Reopen on the workflow of the last run so a returning page matches the
+  // progress it is about to show.
+  if (job.workflow && (job.running || job.result || job.error)) {
+    workflow = job.workflow;
+  }
   let randomize = true;
   let selectedPreset = null;
 
@@ -69,13 +275,12 @@ export async function renderGenerate(root, ctx) {
     images: [],
     audio: null,
     video: null,
-    running: false,
-    result: null,
-    error: "",
-    controller: null,
-    startedAt: 0,
-    elapsedMs: 0,
+    running: job.running,
+    result: job.result,
+    error: job.error,
+    elapsedMs: jobElapsed(),
     timer: null,
+    unsubscribe: null,
   };
 
   root.innerHTML = `
@@ -243,16 +448,13 @@ export async function renderGenerate(root, ctx) {
   }
 
   function startTimer() {
-    if (state.timer) clearInterval(state.timer);
-    state.startedAt = performance.now();
-    state.elapsedMs = 0;
-    progressTime.textContent = "0.0s";
-    state.timer = setInterval(() => {
-      if (!state.startedAt) return;
-      progressTime.textContent = formatDuration(
-        performance.now() - state.startedAt,
-      );
-    }, 200);
+    if (!state.timer) {
+      state.timer = setInterval(() => {
+        if (!job.running) return;
+        progressTime.textContent = formatDuration(jobElapsed());
+      }, 200);
+    }
+    progressTime.textContent = formatDuration(jobElapsed());
   }
 
   function stopTimer() {
@@ -260,12 +462,56 @@ export async function renderGenerate(root, ctx) {
       clearInterval(state.timer);
       state.timer = null;
     }
-    if (state.startedAt) {
-      state.elapsedMs = performance.now() - state.startedAt;
-      state.startedAt = 0;
+  }
+
+  let lastRenderKey = "";
+
+  function syncFromJob(snapshot) {
+    state.running = snapshot.running;
+    state.result = snapshot.result;
+    state.error = snapshot.error;
+    state.elapsedMs = snapshot.elapsedMs;
+
+    // Repaint the buttons/result only when their content can change; progress
+    // events arrive frequently and all move the bar, not the result panel.
+    const renderKey = [
+      snapshot.running,
+      snapshot.error,
+      snapshot.result?.url || "",
+      snapshot.result?.kind || "",
+    ].join("|");
+    if (renderKey !== lastRenderKey) {
+      lastRenderKey = renderKey;
+      renderButtons();
+      renderResult();
     }
-    if (state.elapsedMs) {
-      progressTime.textContent = formatDuration(state.elapsedMs);
+
+    const showingDone =
+      !snapshot.running &&
+      snapshot.doneAt &&
+      snapshot.progress?.message === "Done." &&
+      performance.now() - snapshot.doneAt < 1400;
+
+    if (snapshot.running) {
+      updateProgress(
+        snapshot.progress?.value,
+        snapshot.progress?.message,
+        Boolean(snapshot.progress?.indeterminate),
+      );
+      startTimer();
+    } else if (showingDone) {
+      updateProgress(1, "Done.", false);
+      stopTimer();
+      progressTime.textContent = formatDuration(snapshot.elapsedMs);
+      setTimeout(
+        () => {
+          if (!job.running) hideProgress();
+        },
+        Math.max(0, 1400 - (performance.now() - snapshot.doneAt)),
+      );
+    } else {
+      stopTimer();
+      hideProgress();
     }
   }
 
@@ -1629,7 +1875,7 @@ export async function renderGenerate(root, ctx) {
       state.result = null;
       state.error = "";
       state.elapsedMs = 0;
-      hideProgress();
+      if (!job.running) hideProgress();
     }
 
     renderWorkflowSummary();
@@ -1642,6 +1888,7 @@ export async function renderGenerate(root, ctx) {
   }
 
   function renderButtons() {
+    if (workflowSelect) workflowSelect.disabled = state.running;
     generateButton.disabled = state.running || !config;
     generateButton.innerHTML = state.running
       ? `${spinner("h-4 w-4")} Generating…`
@@ -1668,16 +1915,7 @@ export async function renderGenerate(root, ctx) {
   }
 
   async function runGenerate() {
-    if (!config || state.running) return;
-    state.running = true;
-    state.result = null;
-    state.error = "";
-    state.elapsedMs = 0;
-    state.controller = new AbortController();
-    renderButtons();
-    renderResult();
-    startTimer();
-    updateProgress(0, "Preparing…", true);
+    if (!config || job.running) return;
 
     const payload = {
       workflow: config.name,
@@ -1688,73 +1926,21 @@ export async function renderGenerate(root, ctx) {
       video: refPayload(state.video),
     };
 
-    try {
-      await stream(
-        "/api/generate",
-        payload,
-        (event) => {
-          if (event.type === "phase") {
-            updateProgress(null, event.message, true);
-          } else if (event.type === "progress") {
-            updateProgress(event.value, event.message, Boolean(event.indeterminate));
-          } else if (event.type === "result") {
-            state.result = event;
-            state.error = "";
-            renderResult();
-          } else if (event.type === "error") {
-            state.error = event.message || "Generation failed.";
-            state.running = false;
-            stopTimer();
-            renderButtons();
-            renderResult();
-            toast(state.error, "error");
-          } else if (event.type === "cancelled") {
-            state.error = "Generation cancelled.";
-            state.running = false;
-            stopTimer();
-            renderButtons();
-            renderResult();
-            toast("Generation cancelled.", "warning");
-          } else if (event.type === "done") {
-            state.running = false;
-            stopTimer();
-            renderButtons();
-            renderResult();
-            updateProgress(1, "Done.", false);
-            setTimeout(hideProgress, 1400);
-          }
-        },
-        state.controller.signal,
-      );
-    } catch (error) {
-      if (error.name !== "AbortError") {
-        state.error = error.message || "Generation failed.";
-        state.running = false;
-        stopTimer();
-        renderButtons();
-        renderResult();
-        toast(state.error, "error");
-      }
-    } finally {
-      if (state.startedAt) stopTimer();
-      state.running = false;
-      state.controller = null;
-      renderButtons();
-      if (!state.error) {
-        renderResult();
-        if (state.result) {
-          updateProgress(1, "Done.", false);
-          setTimeout(hideProgress, 1400);
-        }
-      }
-    }
+    await startGeneration(payload);
   }
 
   async function stopGenerate() {
+    if (!job.running) return;
+    job.progress = {
+      value: job.progress?.value,
+      message: "Cancelling…",
+      indeterminate: true,
+    };
+    notifyJob();
     try {
       await api("/api/generate/cancel", { method: "POST" });
-      state.controller?.abort();
       toast("Stopping generation…", "warning", 2200);
+      schedulePoll(250);
     } catch (error) {
       toast(error.message, "error");
     }
@@ -1780,12 +1966,16 @@ export async function renderGenerate(root, ctx) {
   renderResult();
   if (workflow) await loadWorkflow(workflow);
 
+  // Re-attach to the shared run, if any, and repaint progress/result from it.
+  state.unsubscribe = subscribeJob(syncFromJob);
+
   return () => {
-    if (state.timer) clearInterval(state.timer);
-    state.timer = null;
-    if (state.running) {
-      state.controller?.abort();
-      api("/api/generate/cancel", { method: "POST" }).catch(() => {});
+    state.unsubscribe?.();
+    state.unsubscribe = null;
+    if (state.timer) {
+      clearInterval(state.timer);
+      state.timer = null;
     }
+    // The run keeps going: navigating away should not cancel it.
   };
 }

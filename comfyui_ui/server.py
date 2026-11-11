@@ -8,6 +8,7 @@ the sibling modules.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -114,9 +115,21 @@ comfy_process = ComfyUIProcess()
 chat_model = ChatModel()
 audio_model = AudioModel()
 
-# Cancellation flag for ComfyUI generation. The HTTP request that started a run
-# sets it through /api/generate/cancel.
+# ComfyUI generation runs in a background thread so the job outlives the
+# browser connection. The dashboard polls /api/generate/status to catch up
+# after navigation, a reload, or the phone screen turning off.
+_generation_lock = threading.Lock()
 _generation_cancel = threading.Event()
+_generation_state: dict[str, Any] = {
+    "id": None,
+    "running": False,
+    "workflow": None,
+    "progress": None,
+    "result": None,
+    "error": "",
+    "started_at": 0.0,
+    "finished_at": 0.0,
+}
 
 # In-memory stores. Tokens are unguessable and short-lived; the files themselves
 # are cleaned up after a day.
@@ -496,8 +509,37 @@ class FreeBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _install_loop_exception_handler() -> None:
+    """Silence benign Proactor connection-reset callbacks on Windows.
+
+    When the browser aborts an SSE/media request, Windows' Proactor event loop
+    calls ``_call_connection_lost`` on a socket the peer already reset. That
+    raises ``ConnectionResetError`` inside an asyncio callback and the default
+    handler prints a full traceback. The connection is gone either way, so the
+    report is not actionable; keep every other loop error visible.
+    """
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+
+    def handle(loop, context):
+        exc = context.get("exception")
+        callback = getattr(context.get("handle"), "_callback", None)
+        if (
+            isinstance(exc, ConnectionError)
+            and getattr(callback, "__name__", "") == "_call_connection_lost"
+        ):
+            return
+        if previous is not None:
+            previous(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handle)
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    _install_loop_exception_handler()
     # Scan in the background so a large ComfyUI output folder does not delay
     # startup.
     threading.Thread(
@@ -831,8 +873,7 @@ def get_media(token: str) -> FileResponse:
 
 
 def _generate_events(body: GenerateBody):
-    """Yield SSE events while a ComfyUI workflow runs."""
-    _generation_cancel.clear()
+    """Yield generation events while a ComfyUI workflow runs."""
     prompt_id = None
 
     def cancelled() -> bool:
@@ -859,11 +900,13 @@ def _generate_events(body: GenerateBody):
             )
             values = {**values, **{binding_id: seed for binding_id in seed_ids}}
 
-        yield _sse({"type": "phase", "message": "Uploading inputs..."})
-        yield _sse(
-            {"type": "progress", "value": 0, "indeterminate": True,
-             "message": "Uploading inputs..."}
-        )
+        yield {"type": "phase", "message": "Uploading inputs..."}
+        yield {
+            "type": "progress",
+            "value": 0,
+            "indeterminate": True,
+            "message": "Uploading inputs...",
+        }
 
         image_filenames = {}
         load_nodes = list_load_image_nodes(workflow_name)[:MAX_IMAGE_INPUTS]
@@ -876,7 +919,7 @@ def _generate_events(body: GenerateBody):
                 )
 
         if cancelled():
-            yield _sse({"type": "cancelled", "message": "Generation cancelled."})
+            yield {"type": "cancelled", "message": "Generation cancelled."}
             return
 
         audio_filenames = {}
@@ -907,58 +950,54 @@ def _generate_events(body: GenerateBody):
 
         client_id = str(uuid.uuid4())
         prompt_id = client.queue_prompt(workflow, client_id)
-        yield _sse(
-            {"type": "progress", "value": 0, "indeterminate": True,
-             "message": "Queued..."}
-        )
+        yield {
+            "type": "progress",
+            "value": 0,
+            "indeterminate": True,
+            "message": "Queued...",
+        }
 
         for value, maximum, node in client.stream_progress(prompt_id, client_id):
             if cancelled():
                 client.cancel_prompt(prompt_id)
-                yield _sse(
-                    {"type": "cancelled", "message": "Generation cancelled."}
-                )
+                yield {"type": "cancelled", "message": "Generation cancelled."}
                 return
             if value is not None and maximum:
-                yield _sse(
-                    {
-                        "type": "progress",
-                        "value": value / maximum,
-                        "indeterminate": False,
-                        "message": f"Sampling step {value}/{maximum}",
-                    }
-                )
+                yield {
+                    "type": "progress",
+                    "value": value / maximum,
+                    "indeterminate": False,
+                    "message": f"Sampling step {value}/{maximum}",
+                }
             elif node is not None:
-                yield _sse(
-                    {
-                        "type": "progress",
-                        "value": 0,
-                        "indeterminate": True,
-                        "message": f"Running node {node}...",
-                    }
-                )
+                yield {
+                    "type": "progress",
+                    "value": 0,
+                    "indeterminate": True,
+                    "message": f"Running node {node}...",
+                }
 
         if cancelled():
             client.cancel_prompt(prompt_id)
-            yield _sse({"type": "cancelled", "message": "Generation cancelled."})
+            yield {"type": "cancelled", "message": "Generation cancelled."}
             return
 
-        yield _sse(
-            {"type": "progress", "value": 1, "indeterminate": False,
-             "message": "Fetching result..."}
-        )
+        yield {
+            "type": "progress",
+            "value": 1,
+            "indeterminate": False,
+            "message": "Fetching result...",
+        }
 
         if kind == KIND_AUDIO:
             audio_ref = client.wait_for_audio(prompt_id, client_id)
             path = client.fetch_audio(audio_ref)
-            yield _sse(
-                {
-                    "type": "result",
-                    "kind": "audio",
-                    "url": _store_media(path),
-                    "filename": audio_ref.get("filename", ""),
-                }
-            )
+            yield {
+                "type": "result",
+                "kind": "audio",
+                "url": _store_media(path),
+                "filename": audio_ref.get("filename", ""),
+            }
         elif kind == KIND_VIDEO:
             video_ref = client.wait_for_video(prompt_id, client_id)
             path = client.fetch_video(video_ref)
@@ -968,14 +1007,12 @@ def _generate_events(body: GenerateBody):
                 save_video_thumbnail(video_ref.get("filename", ""), path)
             except Exception:  # noqa: BLE001
                 pass
-            yield _sse(
-                {
-                    "type": "result",
-                    "kind": "video",
-                    "url": _store_media(path),
-                    "filename": video_ref.get("filename", ""),
-                }
-            )
+            yield {
+                "type": "result",
+                "kind": "video",
+                "url": _store_media(path),
+                "filename": video_ref.get("filename", ""),
+            }
         else:
             image_ref = client.wait_for_image(prompt_id, client_id)
             # Cache a downscaled copy for the Image Gallery's preview tiles.
@@ -985,35 +1022,147 @@ def _generate_events(body: GenerateBody):
                 save_image_thumbnail(image_ref.get("filename", ""), content)
             except Exception:  # noqa: BLE001
                 pass
-            yield _sse(
-                {
-                    "type": "result",
-                    "kind": "image",
-                    "url": file_proxy_url(image_ref),
-                    "filename": image_ref.get("filename", ""),
-                }
-            )
-        yield _sse({"type": "done"})
-    except requests.exceptions.ConnectionError:
-        yield _sse(
-            {
-                "type": "error",
-                "message": (
-                    f"Could not connect to ComfyUI at {COMFY_URL}. Make sure "
-                    "ComfyUI is running and the URL is correct."
-                ),
+            yield {
+                "type": "result",
+                "kind": "image",
+                "url": file_proxy_url(image_ref),
+                "filename": image_ref.get("filename", ""),
             }
-        )
+        yield {"type": "done"}
+    except requests.exceptions.ConnectionError:
+        yield {
+            "type": "error",
+            "message": (
+                f"Could not connect to ComfyUI at {COMFY_URL}. Make sure "
+                "ComfyUI is running and the URL is correct."
+            ),
+        }
     except (AppError, HTTPException) as exc:
         message = exc.detail if isinstance(exc, HTTPException) else str(exc)
-        yield _sse({"type": "error", "message": message})
+        yield {"type": "error", "message": message}
     except Exception as exc:  # noqa: BLE001
-        yield _sse({"type": "error", "message": f"Generation failed: {exc}"})
+        yield {"type": "error", "message": f"Generation failed: {exc}"}
+
+
+def _record_generation_event(event: dict) -> None:
+    """Merge one generator event into the shared job state."""
+    kind = event.get("type")
+    with _generation_lock:
+        if kind in ("phase", "progress"):
+            _generation_state["progress"] = {
+                "value": event.get("value"),
+                "message": event.get("message", ""),
+                "indeterminate": bool(event.get("indeterminate")),
+            }
+        elif kind == "result":
+            _generation_state["result"] = {
+                "kind": event.get("kind"),
+                "url": event.get("url"),
+                "filename": event.get("filename", ""),
+            }
+        elif kind in ("error", "cancelled"):
+            _generation_state["error"] = event.get("message") or (
+                "Generation cancelled." if kind == "cancelled" else "Generation failed."
+            )
+            _generation_state["running"] = False
+            _generation_state["finished_at"] = time.monotonic()
+        elif kind == "done":
+            _generation_state["running"] = False
+            _generation_state["finished_at"] = time.monotonic()
+            _generation_state["progress"] = {
+                "value": 1,
+                "message": "Done.",
+                "indeterminate": False,
+            }
+
+
+def _run_generation(body: GenerateBody) -> None:
+    """Drive one generation to completion in a worker thread."""
+    try:
+        for event in _generate_events(body):
+            _record_generation_event(event)
+    finally:
+        with _generation_lock:
+            if _generation_state["running"]:
+                # The generator stopped without a terminal event.
+                _generation_state["running"] = False
+                if not _generation_state["error"]:
+                    if _generation_state["result"]:
+                        _generation_state["progress"] = {
+                            "value": 1,
+                            "message": "Done.",
+                            "indeterminate": False,
+                        }
+                    else:
+                        _generation_state["error"] = "Generation ended unexpectedly."
+            if not _generation_state["finished_at"]:
+                _generation_state["finished_at"] = time.monotonic()
+
+
+def _generation_snapshot_locked() -> dict:
+    """Build a JSON-safe snapshot of the job. Caller holds the lock."""
+    state = _generation_state
+    elapsed_ms = 0.0
+    if state["started_at"]:
+        end = (
+            time.monotonic()
+            if state["running"]
+            else (state["finished_at"] or time.monotonic())
+        )
+        elapsed_ms = max(0.0, (end - state["started_at"]) * 1000.0)
+    return {
+        "id": state["id"],
+        "running": state["running"],
+        "workflow": state["workflow"],
+        "progress": dict(state["progress"]) if state["progress"] else None,
+        "result": dict(state["result"]) if state["result"] else None,
+        "error": state["error"],
+        "elapsed_ms": elapsed_ms,
+    }
+
+
+def _generation_snapshot() -> dict:
+    with _generation_lock:
+        return _generation_snapshot_locked()
 
 
 @app.post("/api/generate")
-def generate(body: GenerateBody):
-    return _sse_response(_generate_events(body))
+def generate(body: GenerateBody) -> dict:
+    """Start a generation in the background and return its first snapshot."""
+    with _generation_lock:
+        if _generation_state["running"]:
+            raise HTTPException(
+                status_code=409, detail="A generation is already running."
+            )
+        _generation_cancel.clear()
+        _generation_state.update(
+            {
+                "id": uuid.uuid4().hex,
+                "running": True,
+                "workflow": body.workflow,
+                "progress": {
+                    "value": 0,
+                    "message": "Preparing…",
+                    "indeterminate": True,
+                },
+                "result": None,
+                "error": "",
+                "started_at": time.monotonic(),
+                "finished_at": 0.0,
+            }
+        )
+        threading.Thread(
+            target=_run_generation, args=(body,), daemon=True
+        ).start()
+        return _generation_snapshot_locked()
+
+
+@app.get("/api/generate/status")
+def generation_status() -> JSONResponse:
+    """Return the live state of the last/current generation."""
+    return JSONResponse(
+        _generation_snapshot(), headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.post("/api/generate/cancel")
