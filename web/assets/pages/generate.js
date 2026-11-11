@@ -269,6 +269,9 @@ export async function renderGenerate(root, ctx) {
   }
   let randomize = true;
   let selectedPreset = null;
+  let notesCollapsed = false;
+  // Ignore a previous run's output when it belongs to another workflow.
+  const lastRunMatches = Boolean(workflow) && job.workflow === workflow;
 
   const state = {
     values: {},
@@ -276,8 +279,8 @@ export async function renderGenerate(root, ctx) {
     audio: null,
     video: null,
     running: job.running,
-    result: job.result,
-    error: job.error,
+    result: lastRunMatches ? job.result : null,
+    error: lastRunMatches ? job.error : "",
     elapsedMs: jobElapsed(),
     timer: null,
     unsubscribe: null,
@@ -467,18 +470,24 @@ export async function renderGenerate(root, ctx) {
   let lastRenderKey = "";
 
   function syncFromJob(snapshot) {
+    // The server keeps one global job, so its last result may belong to a
+    // different workflow. Only surface output for the workflow on screen.
+    const matchesWorkflow = Boolean(workflow) && snapshot.workflow === workflow;
+    const snapshotResult = matchesWorkflow ? snapshot.result : null;
+    const snapshotError = matchesWorkflow ? snapshot.error : "";
+
     state.running = snapshot.running;
-    state.result = snapshot.result;
-    state.error = snapshot.error;
+    state.result = snapshotResult;
+    state.error = snapshotError;
     state.elapsedMs = snapshot.elapsedMs;
 
     // Repaint the buttons/result only when their content can change; progress
     // events arrive frequently and all move the bar, not the result panel.
     const renderKey = [
       snapshot.running,
-      snapshot.error,
-      snapshot.result?.url || "",
-      snapshot.result?.kind || "",
+      snapshotError,
+      snapshotResult?.url || "",
+      snapshotResult?.kind || "",
     ].join("|");
     if (renderKey !== lastRenderKey) {
       lastRenderKey = renderKey;
@@ -594,13 +603,13 @@ export async function renderGenerate(root, ctx) {
               <p class="text-xs text-slate-500">Audio result</p>
             </div>
           </div>
-          <audio class="w-full" controls autoplay src="${escapeHtml(item.url)}"></audio>
+          <audio class="w-full" controls src="${escapeHtml(item.url)}"></audio>
         </div>
       `;
     } else {
       result.innerHTML = `
         <div class="overflow-hidden rounded-2xl border border-subtle bg-ink-950">
-          <video class="max-h-[72vh] w-full" controls autoplay playsinline src="${escapeHtml(item.url)}"></video>
+          <video class="max-h-[72vh] w-full" controls playsinline src="${escapeHtml(item.url)}"></video>
           <div class="flex items-center justify-between gap-3 border-t border-subtle px-4 py-3">
             <p class="truncate text-xs text-slate-400">${escapeHtml(item.filename || "Generated video")}</p>
             <a class="btn-ghost btn-xs" href="${escapeHtml(item.url)}" download>${icon("download", "h-4 w-4")} Download</a>
@@ -624,7 +633,7 @@ export async function renderGenerate(root, ctx) {
   }
 
   function renderNotes() {
-    if (!config?.notes) {
+    if (!config) {
       notesCard.classList.add("hidden");
       notesCard.innerHTML = "";
       return;
@@ -632,18 +641,36 @@ export async function renderGenerate(root, ctx) {
     notesCard.classList.remove("hidden");
     notesCard.innerHTML = `
       <div class="card-header">
-        <div class="flex items-center gap-2.5">
-          <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-300">${icon("info", "h-4 w-4")}</span>
-          <div>
-            <h2 class="card-title">Workflow notes</h2>
-            <p class="card-subtitle">Tips saved for this workflow</p>
-          </div>
-        </div>
+        <button type="button" class="flex min-w-0 flex-1 items-center gap-2.5 text-left" data-notes-toggle aria-expanded="${notesCollapsed ? "false" : "true"}" aria-controls="workflow-notes-body">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-300">${icon("info", "h-4 w-4")}</span>
+          <span class="min-w-0">
+            <span class="card-title block">Workflow notes</span>
+            <span class="card-subtitle block">Tips saved for this workflow</span>
+          </span>
+          <span class="ml-auto shrink-0 text-slate-500 transition-transform ${notesCollapsed ? "" : "rotate-180"}" data-notes-chevron>${icon("chevron", "h-4 w-4")}</span>
+        </button>
         <button class="btn-ghost btn-xs" data-edit-notes>${icon("pencil", "h-4 w-4")} Edit</button>
       </div>
-      <div class="prose-notes p-4 sm:p-5">${renderMarkdown(config.notes)}</div>
+      <div id="workflow-notes-body" data-notes-body class="${notesCollapsed ? "hidden" : ""}">
+        ${
+          config.notes
+            ? `<div class="prose-notes p-4 sm:p-5">${renderMarkdown(config.notes)}</div>`
+            : `<p class="p-4 text-sm text-slate-500 sm:p-5">No notes for this workflow yet. Use Edit to add tips.</p>`
+        }
+      </div>
     `;
-    notesCard.querySelector("[data-edit-notes]")?.addEventListener("click", openInputPicker);
+    notesCard.querySelector("[data-edit-notes]")?.addEventListener("click", openNotesEditor);
+    notesCard.querySelector("[data-notes-toggle]")?.addEventListener("click", () => {
+      notesCollapsed = !notesCollapsed;
+      notesCard
+        .querySelector("[data-notes-body]")
+        ?.classList.toggle("hidden", notesCollapsed);
+      const toggle = notesCard.querySelector("[data-notes-toggle]");
+      toggle?.setAttribute("aria-expanded", String(!notesCollapsed));
+      toggle
+        ?.querySelector("[data-notes-chevron]")
+        ?.classList.toggle("rotate-180", !notesCollapsed);
+    });
   }
 
   function renderPresets() {
@@ -1728,17 +1755,6 @@ export async function renderGenerate(root, ctx) {
               </tbody>
             </table>
           </div>
-
-          <div class="space-y-2 rounded-xl border border-subtle bg-raised p-4">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p class="text-sm font-semibold text-slate-200">Workflow notes</p>
-                <p class="text-[11px] text-slate-500">Markdown shown in the notes panel on the Generate page.</p>
-              </div>
-              <button class="btn-ghost btn-xs" data-save-notes>${icon("save", "h-4 w-4")} Save notes</button>
-            </div>
-            <textarea class="textarea mt-2 font-mono text-xs" rows="7" data-notes placeholder="### Tips&#10;&#10;- Add workflow-specific tips here.">${escapeHtml(config.notes || "")}</textarea>
-          </div>
         </div>
       `,
       footer: `
@@ -1793,24 +1809,6 @@ export async function renderGenerate(root, ctx) {
         updateRowState(index);
       });
     });
-    modal.body.querySelector("[data-save-notes]")?.addEventListener("click", async (event) => {
-      const button = event.currentTarget;
-      const notes = modal.body.querySelector("[data-notes]").value;
-      setButtonBusy(button, true, "Saving…");
-      try {
-        const response = await api(`${workflowUrl(config.name)}/notes`, {
-          method: "PUT",
-          body: { notes },
-        });
-        config.notes = response.notes;
-        renderNotes();
-        toast("Notes saved.", "success");
-      } catch (error) {
-        toast(error.message, "error");
-      } finally {
-        setButtonBusy(button, false);
-      }
-    });
     modal.element.querySelector("[data-picker-close]")?.addEventListener("click", () => modal.close());
     modal.element.querySelector("[data-picker-save]")?.addEventListener("click", async (event) => {
       const button = event.currentTarget;
@@ -1854,6 +1852,44 @@ export async function renderGenerate(root, ctx) {
     });
   }
 
+  function openNotesEditor() {
+    if (!config) return;
+    const modal = openModal({
+      title: "Workflow notes",
+      subtitle: `Markdown tips shown on the Generate page for ${config.name}.`,
+      size: "lg",
+      content: `
+        <textarea class="textarea font-mono text-xs" rows="14" data-notes placeholder="### Tips&#10;&#10;- Add workflow-specific tips here.">${escapeHtml(config.notes || "")}</textarea>
+      `,
+      footer: `
+        <div class="flex w-full flex-wrap items-center justify-end gap-2">
+          <button class="btn-secondary" data-notes-cancel>Cancel</button>
+          <button class="btn-primary" data-notes-save>${icon("check", "h-4 w-4")} Save notes</button>
+        </div>
+      `,
+    });
+
+    modal.element.querySelector("[data-notes-cancel]")?.addEventListener("click", () => modal.close());
+    modal.element.querySelector("[data-notes-save]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const notes = modal.body.querySelector("[data-notes]").value;
+      setButtonBusy(button, true, "Saving…");
+      try {
+        const response = await api(`${workflowUrl(config.name)}/notes`, {
+          method: "PUT",
+          body: { notes },
+        });
+        config.notes = response.notes;
+        renderNotes();
+        modal.close();
+        toast("Notes saved.", "success");
+      } catch (error) {
+        toast(error.message, "error");
+        setButtonBusy(button, false);
+      }
+    });
+  }
+
   /* ---------------------------------------------------------------- */
   /* Config lifecycle and generation                                  */
   /* ---------------------------------------------------------------- */
@@ -1884,6 +1920,9 @@ export async function renderGenerate(root, ctx) {
     renderMedia();
     renderControls();
     renderResult();
+    // The config render bypasses the job snapshot cache, so force the next
+    // snapshot to repaint the result panel.
+    lastRenderKey = "";
     renderButtons();
   }
 
