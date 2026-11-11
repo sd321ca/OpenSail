@@ -1,4 +1,5 @@
 import { api, uploadFile } from "../api.js";
+import { openAudioTrimmer } from "../audio.js";
 import {
   clamp,
   confirmDialog,
@@ -872,8 +873,10 @@ export async function renderGenerate(root, ctx) {
 
     inputsCard.querySelector("[data-audio-upload]")?.addEventListener("change", (event) => {
       const file = event.target.files?.[0];
-      if (file) uploadMediaRef(file, (ref) => (state.audio = ref), "Audio");
+      event.target.value = "";
+      if (file) openAudioUpload(file);
     });
+    inputsCard.querySelector("[data-audio-trim]")?.addEventListener("click", openAudioTrim);
     inputsCard.querySelector("[data-audio-clear]")?.addEventListener("click", () => {
       state.audio = null;
       renderMedia();
@@ -930,6 +933,7 @@ export async function renderGenerate(root, ctx) {
             ${icon("upload", "h-3.5 w-3.5")} ${ref ? "Replace audio" : "Upload audio"}
             <input type="file" accept="audio/*" class="sr-only" data-audio-upload />
           </label>
+          ${ref ? `<button class="btn-ghost btn-xs" data-audio-trim>${icon("scissors", "h-3.5 w-3.5")} Trim</button>` : ""}
           ${ref ? `<span class="min-w-0 flex-1 truncate text-[11px] text-slate-500">${escapeHtml(ref.name || "Audio selected")}</span>` : `<span class="text-[11px] text-slate-600">No reference audio selected</span>`}
           ${ref ? `<button class="btn-ghost btn-xs text-rose-300 hover:bg-rose-500/10" data-audio-clear>${icon("trash", "h-3.5 w-3.5")}</button>` : ""}
         </div>
@@ -985,6 +989,43 @@ export async function renderGenerate(root, ctx) {
     } catch (error) {
       toast(error.message, "error");
     }
+  }
+
+  function openAudioUpload(file) {
+    openAudioTrimmer({
+      source: file,
+      name: file.name || "audio",
+      title: "Trim reference audio",
+      subtitle:
+        "Choose the part of the clip to keep before uploading. Trimmed selections are saved as WAV.",
+      onApply: (trimmed) => uploadAudioRef(trimmed),
+    });
+  }
+
+  function openAudioTrim() {
+    const ref = state.audio;
+    if (!ref?.previewUrl) {
+      toast("Choose an audio file first.", "warning");
+      return;
+    }
+    openAudioTrimmer({
+      source: ref.previewUrl,
+      name: ref.name || "audio",
+      title: "Trim reference audio",
+      subtitle: "Choose the part of the clip to keep.",
+      onApply: (trimmed) => uploadAudioRef(trimmed),
+    });
+  }
+
+  async function uploadAudioRef(file) {
+    const stored = await uploadFile(file);
+    state.audio = {
+      upload: stored.id,
+      previewUrl: stored.url,
+      name: stored.name || file.name,
+    };
+    renderMedia();
+    toast("Audio ready.", "success", 1600);
   }
 
   async function openImageGallery(index) {

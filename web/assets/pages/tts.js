@@ -1,4 +1,5 @@
 import { api, stream, uploadFile } from "../api.js";
+import { openAudioTrimmer } from "../audio.js";
 import {
   confirmDialog,
   emptyState,
@@ -328,6 +329,28 @@ export async function renderTTS(root, ctx) {
     }
   }
 
+  async function uploadReference(file) {
+    const stored = await uploadFile(file);
+    reference = {
+      id: stored.id,
+      url: stored.url,
+      name: stored.name || file.name,
+    };
+    renderReferencePanel();
+    toast("Reference clip ready.", "success");
+  }
+
+  function trimReference(source, name) {
+    openAudioTrimmer({
+      source,
+      name: name || "reference",
+      title: "Trim reference clip",
+      subtitle:
+        "Choose the part of the clip to keep before uploading. Trimmed selections are saved as WAV.",
+      onApply: (trimmed) => uploadReference(trimmed),
+    });
+  }
+
   async function saveVoice() {
     if (!reference) return toast("Upload a reference clip first.", "warning");
     const name = voiceName.trim();
@@ -476,6 +499,7 @@ export async function renderTTS(root, ctx) {
           <input type="file" accept="audio/*" class="sr-only" data-ref-upload />
         </label>
         ${reference ? `<span class="min-w-0 flex-1 truncate text-[11px] text-slate-400">${escapeHtml(reference.name || "Reference clip")}</span>` : `<span class="text-[11px] text-slate-500">WAV, MP3, FLAC, OGG or M4A</span>`}
+        ${reference ? `<button class="btn-ghost btn-xs" data-ref-trim>${icon("scissors", "h-3.5 w-3.5")} Trim</button>` : ""}
         ${reference ? `<button class="btn-ghost btn-xs text-rose-300 hover:bg-rose-500/10" data-ref-clear>${icon("trash", "h-3.5 w-3.5")}</button>` : ""}
       </div>
       ${reference ? `<audio class="mt-3 w-full" controls src="${escapeHtml(reference.url)}"></audio>` : ""}
@@ -494,17 +518,15 @@ export async function renderTTS(root, ctx) {
       voiceName = event.target.value;
     });
     panel.querySelector("[data-save-voice]")?.addEventListener("click", saveVoice);
-    panel.querySelector("[data-ref-upload]")?.addEventListener("change", async (event) => {
+    panel.querySelector("[data-ref-upload]")?.addEventListener("change", (event) => {
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) return;
-      try {
-        const stored = await uploadFile(file);
-        reference = { id: stored.id, url: stored.url, name: stored.name };
-        renderReferencePanel();
-      } catch (error) {
-        toast(error.message, "error");
-      }
+      trimReference(file, file.name);
+    });
+    panel.querySelector("[data-ref-trim]")?.addEventListener("click", () => {
+      if (!reference) return;
+      trimReference(reference.url, reference.name);
     });
     panel.querySelector("[data-ref-clear]")?.addEventListener("click", () => {
       reference = null;
