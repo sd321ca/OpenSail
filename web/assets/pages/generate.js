@@ -877,6 +877,7 @@ export async function renderGenerate(root, ctx) {
       if (file) openAudioUpload(file);
     });
     inputsCard.querySelector("[data-audio-trim]")?.addEventListener("click", openAudioTrim);
+    inputsCard.querySelector("[data-audio-gallery]")?.addEventListener("click", openAudioGallery);
     inputsCard.querySelector("[data-audio-clear]")?.addEventListener("click", () => {
       state.audio = null;
       renderMedia();
@@ -933,6 +934,7 @@ export async function renderGenerate(root, ctx) {
             ${icon("upload", "h-3.5 w-3.5")} ${ref ? "Replace audio" : "Upload audio"}
             <input type="file" accept="audio/*" class="sr-only" data-audio-upload />
           </label>
+          <button class="btn-ghost btn-xs" data-audio-gallery>${icon("gallery", "h-3.5 w-3.5")} Gallery</button>
           ${ref ? `<button class="btn-ghost btn-xs" data-audio-trim>${icon("scissors", "h-3.5 w-3.5")} Trim</button>` : ""}
           ${ref ? `<span class="min-w-0 flex-1 truncate text-[11px] text-slate-500">${escapeHtml(ref.name || "Audio selected")}</span>` : `<span class="text-[11px] text-slate-600">No reference audio selected</span>`}
           ${ref ? `<button class="btn-ghost btn-xs text-rose-300 hover:bg-rose-500/10" data-audio-clear>${icon("trash", "h-3.5 w-3.5")}</button>` : ""}
@@ -1147,6 +1149,62 @@ export async function renderGenerate(root, ctx) {
       });
       modal.body.querySelectorAll("img[data-thumbnail]").forEach((image) => {
         image.addEventListener("error", () => image.remove());
+      });
+    } catch (error) {
+      modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(error.message)}</p>`;
+    }
+  }
+
+  async function openAudioGallery() {
+    const modal = openModal({
+      title: "Choose audio",
+      subtitle: "Reuse a recent audio clip from ComfyUI or the media folder.",
+      size: "lg",
+      content: `<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">${Array.from({ length: 6 })
+        .map(() => '<div class="skeleton h-32"></div>')
+        .join("")}</div>`,
+    });
+    try {
+      const data = await api("/api/gallery/audio?limit=60");
+      if (!data.items.length) {
+        modal.body.innerHTML = emptyState(
+          "No audio yet",
+          "Generate audio first, add a clip to the media folder, or upload one above.",
+          "music",
+        );
+        return;
+      }
+      modal.body.innerHTML = `<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        ${data.items
+          .map(
+            (item, itemIndex) => `
+            <div class="rounded-xl border border-subtle bg-raised p-3">
+              <div class="mb-2 flex items-center gap-2">
+                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">${icon("music", "h-4 w-4")}</span>
+                <div class="min-w-0">
+                  <p class="truncate text-xs font-semibold text-slate-200">${escapeHtml(item.filename)}</p>
+                  ${item.prompt ? `<p class="truncate text-[11px] text-slate-500">${escapeHtml(item.prompt)}</p>` : ""}
+                </div>
+              </div>
+              <audio class="mb-2 w-full" controls preload="none" src="${escapeHtml(item.url)}"></audio>
+              <button class="btn-secondary btn-xs w-full" data-audio-item="${itemIndex}">${icon("check", "h-3.5 w-3.5")} Use this audio</button>
+            </div>
+          `,
+          )
+          .join("")}
+      </div>`;
+      modal.body.querySelectorAll("[data-audio-item]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = data.items[Number(button.dataset.audioItem)];
+          state.audio = {
+            gallery: item,
+            previewUrl: item.url,
+            name: item.filename,
+          };
+          modal.close();
+          renderMedia();
+          toast("Gallery audio selected.", "success", 1600);
+        });
       });
     } catch (error) {
       modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(error.message)}</p>`;
