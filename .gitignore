@@ -32,6 +32,9 @@ voices/
 # Cached image thumbnails used by the Image Gallery (auto-generated)
 thumbnails/
 
+# Local media drop folder shown in the galleries (user content)
+media/
+
 # Locally generated TLS certificates / private keys
 configs/certs/*
 !configs/certs/.gitkeep

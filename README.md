@@ -268,6 +268,14 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   ComfyUI media file no longer exists are deleted. When the local ComfyUI
   folders are not configured, ComfyUI's history is used as the fallback check.
 
+  All three galleries also show files from the `media/` folder beside
+  `thumbnails/`. Drop images, audio or video into it (subfolders are scanned
+  too) and press **Refresh**; they appear alongside ComfyUI history and can be
+  reused as inputs on the Generate page. The folder is created automatically on
+  startup. Local images and videos get cached thumbnails in
+  `thumbnails/local/`, generated on demand the first time a tile is viewed and
+  refreshed when the source file changes.
+
   <img width="375" height="687" alt="gallery2" src="https://github.com/user-attachments/assets/38088c6f-180e-4fec-afdf-06bf7264449c" />
 
 ## Adding workflows

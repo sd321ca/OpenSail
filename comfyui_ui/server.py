@@ -57,6 +57,7 @@ from .config import (
     DEFAULT_WORKFLOW,
     KIND_AUDIO,
     KIND_VIDEO,
+    LOCAL_MEDIA_DIR,
     MAX_IMAGE_INPUTS,
     SERVER_NAME,
     SERVER_PORT,
@@ -69,11 +70,15 @@ from .fields import (
     save_workflow_fields,
 )
 from .gallery import (
+    IMAGE_EXTENSIONS,
+    LOCAL_MEDIA_TYPE,
     cleanup_orphaned_thumbnails,
+    ensure_local_thumbnail,
     file_proxy_url,
     list_gallery_audio,
     list_gallery_images,
     list_gallery_videos,
+    local_media_path,
     save_image_thumbnail,
     save_video_thumbnail,
     thumbnail_path,
@@ -108,6 +113,23 @@ UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "opensail_uploads")
 os.makedirs(MEDIA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+os.makedirs(LOCAL_MEDIA_DIR, exist_ok=True)
+
+# mimetypes misses a few modern formats on some platforms (notably WebP and
+# AVIF on Windows). Local gallery files are served inline, so supply them.
+_EXTRA_MEDIA_TYPES = {
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
+
+
+def _local_media_type(path: str) -> str | None:
+    """Return the content type to serve a local media file with."""
+    extension = os.path.splitext(path)[1].lower()
+    return mimetypes.guess_type(path)[0] or _EXTRA_MEDIA_TYPES.get(extension)
+
 
 # Long-lived backend managers. They start their subprocesses lazily.
 client = ComfyUIClient()
@@ -252,6 +274,13 @@ def _media_ref_path(ref: Optional[dict], kind: str = "file") -> Optional[str]:
         return _upload_item(upload_id)["path"]
     gallery = ref.get("gallery")
     if gallery:
+        if gallery.get("type") == LOCAL_MEDIA_TYPE:
+            path = local_media_path(
+                gallery.get("subfolder", ""), gallery.get("filename", "")
+            )
+            if path is None:
+                raise AppError("That file is no longer in the local media folder.")
+            return path
         try:
             if kind == "video":
                 return client.fetch_video(gallery)
@@ -279,6 +308,14 @@ def _image_ref_image(ref: Optional[dict]) -> Image.Image | None:
             return image.copy()
     gallery = ref.get("gallery")
     if gallery:
+        if gallery.get("type") == LOCAL_MEDIA_TYPE:
+            path = local_media_path(
+                gallery.get("subfolder", ""), gallery.get("filename", "")
+            )
+            if path is None:
+                return None
+            with Image.open(path) as image:
+                return image.copy()
         content, _content_type = client.fetch_image_bytes(gallery)
         with Image.open(io.BytesIO(content)) as image:
             return image.copy()
@@ -1219,6 +1256,26 @@ def gallery_thumbnail(filename: str):
     return FileResponse(path)
 
 
+@app.get("/api/gallery/local-thumbnail")
+def gallery_local_thumbnail(filename: str, subfolder: str = ""):
+    """Generate and serve a thumbnail for a local media file."""
+    path = local_media_path(subfolder, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Media file not found.")
+
+    thumbnail = ensure_local_thumbnail(path)
+    if thumbnail is not None:
+        return FileResponse(thumbnail, media_type="image/jpeg")
+
+    # If an image cannot be converted (an unsupported format, for example),
+    # serve the original so the browser can still try to display it. Videos
+    # return 404 so the gallery falls back to its placeholder icon.
+    extension = os.path.splitext(path)[1].lower()
+    if extension in IMAGE_EXTENSIONS:
+        return FileResponse(path, media_type=_local_media_type(path))
+    raise HTTPException(status_code=404, detail="Thumbnail not available.")
+
+
 @app.get("/api/gallery/file")
 def gallery_file(
     request: Request,
@@ -1226,7 +1283,13 @@ def gallery_file(
     subfolder: str = "",
     type: str = "output",
 ):
-    """Proxy a ComfyUI output file (image, audio or video) to the browser."""
+    """Proxy a ComfyUI output file, or serve one from the local media folder."""
+    if type == LOCAL_MEDIA_TYPE:
+        path = local_media_path(subfolder, filename)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Media file not found.")
+        return FileResponse(path, media_type=_local_media_type(path))
+
     params = {"filename": filename, "subfolder": subfolder, "type": type}
     headers = {}
     range_header = request.headers.get("range")

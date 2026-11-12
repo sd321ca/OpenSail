@@ -16,6 +16,10 @@ CONFIGS_DIR = os.path.join(BASE_DIR, "configs")
 # Slow-loading image previews for the gallery are cached here, using the same
 # filename as the generated image.
 THUMBNAILS_DIR = os.path.join(BASE_DIR, "thumbnails")
+# Optional drop folder for local media (images, audio and video). Files placed
+# here are listed in the galleries alongside ComfyUI history, and can be used
+# as inputs on the Generate page. Subfolders are scanned too.
+LOCAL_MEDIA_DIR = os.path.join(BASE_DIR, "media")
 # Optional .env file at the project root, holding secrets such as the dashboard
 # login credentials. Values already present in the environment take priority.
 ENV_PATH = os.path.join(BASE_DIR, ".env")

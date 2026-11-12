@@ -1,4 +1,5 @@
-"""Gallery data: list recent generated images, audio and video from ComfyUI.
+"""Gallery data: list recent images, audio and video from ComfyUI and the
+optional local media folder.
 
 The dashboard proxies media through its own server so a browser on another
 machine on the LAN can view the gallery even when it cannot reach ComfyUI
@@ -10,13 +11,14 @@ import io
 import os
 import subprocess
 import tempfile
+import threading
 from urllib.parse import urlencode
 
 from PIL import Image
 
 from .audio import _resolve_ffmpeg
-from .comfy_client import ComfyUIClient, is_video_filename
-from .config import COMFY_MEDIA_DIRS, COMFY_URL, THUMBNAILS_DIR
+from .comfy_client import ComfyUIClient, VIDEO_EXTENSIONS, is_video_filename
+from .config import COMFY_MEDIA_DIRS, COMFY_URL, LOCAL_MEDIA_DIR, THUMBNAILS_DIR
 from .errors import AppError
 
 # Route on the app server that proxies a ComfyUI output file (images, audio and
@@ -24,6 +26,13 @@ from .errors import AppError
 FILE_PROXY_ROUTE = "/api/gallery/file"
 # Route that serves a cached gallery thumbnail by its original filename.
 THUMBNAIL_ROUTE = "/api/gallery/thumbnail"
+# Route that generates and serves a thumbnail for a local media file.
+LOCAL_THUMBNAIL_ROUTE = "/api/gallery/local-thumbnail"
+# Local media thumbnails live in their own subfolder so their names can mirror
+# the media folder structure without colliding with ComfyUI history thumbnails.
+LOCAL_THUMBNAILS_SUBDIR = "local"
+# ``type`` value for gallery references backed by the local media folder.
+LOCAL_MEDIA_TYPE = "local"
 
 # Longest edge of a gallery thumbnail, in pixels. Images are only ever shrunk,
 # never upscaled.
@@ -34,6 +43,31 @@ THUMBNAIL_JPEG_QUALITY = 82
 # Image sources that can be re-encoded as JPEG without changing the filename.
 JPEG_EXTENSIONS = (".jpg", ".jpeg")
 
+# File types picked up from the optional local media folder. Videos use the
+# same extension list as ComfyUI's output detection.
+IMAGE_EXTENSIONS = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".avif",
+)
+AUDIO_EXTENSIONS = (
+    ".wav",
+    ".mp3",
+    ".flac",
+    ".ogg",
+    ".oga",
+    ".m4a",
+    ".aac",
+    ".opus",
+    ".wma",
+)
+
 
 def file_proxy_url(ref: dict) -> str:
     """Build a proxy URL for a ComfyUI file reference."""
@@ -43,6 +77,86 @@ def file_proxy_url(ref: dict) -> str:
         "type": ref.get("type", "output"),
     }
     return f"{FILE_PROXY_ROUTE}?" + urlencode(params)
+
+
+def local_media_path(subfolder: str, filename: str) -> str | None:
+    """Resolve a local media reference to a file inside the media folder.
+
+    Returns None when the reference is empty or escapes :data:`LOCAL_MEDIA_DIR`,
+    so neither the gallery nor the file route can serve arbitrary files.
+    """
+    if not filename:
+        return None
+    root = os.path.realpath(LOCAL_MEDIA_DIR)
+    candidate = os.path.realpath(
+        os.path.join(root, subfolder or "", filename)
+    )
+    try:
+        common = os.path.commonpath([root, candidate])
+    except ValueError:  # Different drives on Windows.
+        return None
+    if os.path.normcase(common) != os.path.normcase(root):
+        return None
+    return candidate if os.path.isfile(candidate) else None
+
+
+def local_thumbnail_url(filename: str, subfolder: str = "") -> str:
+    """Build the on-demand thumbnail URL for a local media file."""
+    params = {"filename": filename, "subfolder": subfolder}
+    return f"{LOCAL_THUMBNAIL_ROUTE}?" + urlencode(params)
+
+
+def _list_local_media(
+    extensions: tuple[str, ...], limit: int | None = None
+) -> list[tuple[str, str]]:
+    """Return ``(filename, subfolder)`` pairs from the local media folder.
+
+    Entries are sorted newest-first by modification time. Hidden files and
+    folders are skipped, and subfolders are scanned recursively.
+    """
+    if not os.path.isdir(LOCAL_MEDIA_DIR):
+        return []
+
+    root_dir = os.path.abspath(LOCAL_MEDIA_DIR)
+    found = []
+    for root, dirs, files in os.walk(root_dir):
+        dirs[:] = [name for name in dirs if not name.startswith(".")]
+        for name in files:
+            if name.startswith("."):
+                continue
+            if os.path.splitext(name)[1].lower() not in extensions:
+                continue
+            try:
+                modified = os.path.getmtime(os.path.join(root, name))
+            except OSError:
+                continue
+            subfolder = os.path.relpath(root, root_dir)
+            if subfolder == ".":
+                subfolder = ""
+            else:
+                subfolder = subfolder.replace(os.sep, "/")
+            found.append((modified, name, subfolder))
+
+    found.sort(key=lambda entry: entry[0], reverse=True)
+    items = [(name, subfolder) for _modified, name, subfolder in found]
+    return items[:limit] if limit is not None else items
+
+
+def _local_media_ref(
+    filename: str, subfolder: str, thumbnail: bool = False
+) -> dict:
+    """Build a gallery entry for a file in the local media folder."""
+    ref = {
+        "filename": filename,
+        "subfolder": subfolder,
+        "type": LOCAL_MEDIA_TYPE,
+        "source": LOCAL_MEDIA_TYPE,
+        "prompt": "",
+    }
+    ref["url"] = file_proxy_url(ref)
+    if thumbnail:
+        ref["thumbnail_url"] = local_thumbnail_url(filename, subfolder)
+    return ref
 
 
 def _thumbnail_name(filename: str) -> str | None:
@@ -140,19 +254,17 @@ def save_image_thumbnail(filename: str, content: bytes) -> bool:
         return False
 
 
-def save_video_thumbnail(filename: str, video_path: str) -> bool:
-    """Extract a still frame and save it as the video's cached thumbnail.
-
-    The image is written as ``<video filename>.jpg`` in
-    :data:`config.THUMBNAILS_DIR`. Video decoding needs ffmpeg; when it is not
-    available, or extraction fails, this returns False without raising.
-    """
-    name = _thumbnail_name(filename)
+def _write_video_thumbnail(video_path: str, target: str) -> bool:
+    """Extract a still frame from a video and write it as a JPEG."""
     ffmpeg = _resolve_ffmpeg()
-    if name is None or not ffmpeg or not os.path.isfile(video_path):
+    if not ffmpeg or not os.path.isfile(video_path):
         return False
 
-    os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+    except OSError:
+        return False
+
     fd, frame_path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -193,8 +305,6 @@ def save_video_thumbnail(filename: str, video_path: str) -> bool:
         with Image.open(frame_path) as source:
             thumbnail = source.convert("RGB")
         thumbnail.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
-
-        target = os.path.join(THUMBNAILS_DIR, f"{name}.jpg")
         thumbnail.save(
             target,
             format="JPEG",
@@ -210,6 +320,126 @@ def save_video_thumbnail(filename: str, video_path: str) -> bool:
             os.remove(frame_path)
         except OSError:
             pass
+
+
+def save_video_thumbnail(filename: str, video_path: str) -> bool:
+    """Extract a still frame and save it as the video's cached thumbnail.
+
+    The image is written as ``<video filename>.jpg`` in
+    :data:`config.THUMBNAILS_DIR`. Video decoding needs ffmpeg; when it is not
+    available, or extraction fails, this returns False without raising.
+    """
+    name = _thumbnail_name(filename)
+    if name is None:
+        return False
+    os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+    return _write_video_thumbnail(
+        video_path, os.path.join(THUMBNAILS_DIR, f"{name}.jpg")
+    )
+
+
+def _local_thumbnail_path(source_path: str) -> str | None:
+    """Return the cache path for a local media file, or None if it escapes."""
+    root = os.path.realpath(LOCAL_MEDIA_DIR)
+    source = os.path.realpath(source_path)
+    try:
+        relative = os.path.relpath(source, root)
+    except ValueError:  # Different drives on Windows.
+        return None
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        return None
+    return os.path.join(
+        THUMBNAILS_DIR, LOCAL_THUMBNAILS_SUBDIR, relative + ".jpg"
+    )
+
+
+def _write_image_file_thumbnail(source_path: str, target: str) -> bool:
+    """Downscale an image file and write it as a compact JPEG."""
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with Image.open(source_path) as source:
+            image = source.copy()
+        _write_jpeg_thumbnail(image, target)
+        return True
+    except Exception:  # noqa: BLE001 - thumbnails are best-effort
+        return False
+
+
+# Generating a thumbnail can be slow (video frame extraction especially), so
+# concurrent requests for the same file wait for the first one instead of
+# decoding it several times.
+_local_thumbnail_locks: dict[str, threading.Lock] = {}
+_local_thumbnail_locks_guard = threading.Lock()
+
+
+def _local_thumbnail_lock(target: str) -> threading.Lock:
+    with _local_thumbnail_locks_guard:
+        return _local_thumbnail_locks.setdefault(target, threading.Lock())
+
+
+def _local_thumbnail_is_fresh(target: str, source_path: str) -> bool:
+    try:
+        return (
+            os.path.isfile(target)
+            and os.path.getmtime(target) >= os.path.getmtime(source_path)
+        )
+    except OSError:
+        return False
+
+
+def ensure_local_thumbnail(source_path: str) -> str | None:
+    """Return a cached thumbnail for a local media file, creating it if needed.
+
+    Images are decoded with Pillow and videos use ffmpeg. Returns None when the
+    source is not a supported media file or the thumbnail cannot be produced.
+    """
+    target = _local_thumbnail_path(source_path)
+    if target is None:
+        return None
+    if _local_thumbnail_is_fresh(target, source_path):
+        return target
+
+    extension = os.path.splitext(source_path)[1].lower()
+    with _local_thumbnail_lock(target):
+        if _local_thumbnail_is_fresh(target, source_path):
+            return target
+        if extension in IMAGE_EXTENSIONS:
+            generated = _write_image_file_thumbnail(source_path, target)
+        elif extension in VIDEO_EXTENSIONS:
+            generated = _write_video_thumbnail(source_path, target)
+        else:
+            return None
+
+    return target if generated and os.path.isfile(target) else None
+
+
+def _cleanup_orphaned_local_thumbnails() -> list[str]:
+    """Delete local media thumbnails whose source file no longer exists."""
+    root = os.path.join(THUMBNAILS_DIR, LOCAL_THUMBNAILS_SUBDIR)
+    removed = []
+    if not os.path.isdir(root):
+        return removed
+
+    for walk_root, _dirs, files in os.walk(root, topdown=False):
+        for name in files:
+            if not name.lower().endswith(".jpg"):
+                continue
+            path = os.path.join(walk_root, name)
+            relative = os.path.relpath(path, root)
+            source = os.path.join(LOCAL_MEDIA_DIR, relative[:-4])
+            if os.path.isfile(source):
+                continue
+            try:
+                os.remove(path)
+                removed.append(relative.replace(os.sep, "/"))
+            except OSError:
+                pass
+        try:
+            if not os.listdir(walk_root):
+                os.rmdir(walk_root)
+        except OSError:
+            pass
+    return removed
 
 
 def _thumbnail_source_name(name: str, sources: set[str]) -> str:
@@ -275,10 +505,11 @@ def cleanup_orphaned_thumbnails(
 ) -> list[str]:
     """Delete cached thumbnails whose original media file no longer exists.
 
-    Returns the filenames that were removed. The check is skipped when neither
-    local ComfyUI media folders nor its history can be read.
+    Returns the filenames that were removed. ComfyUI thumbnails are skipped
+    when neither its media folders nor its history can be read, but thumbnails
+    for the local media folder are always checked.
     """
-    removed = []
+    removed = _cleanup_orphaned_local_thumbnails()
     if not os.path.isdir(THUMBNAILS_DIR):
         return removed
 
@@ -340,15 +571,28 @@ def _load_history(client: ComfyUIClient) -> list:
         ) from exc
 
 
+def _gallery_history(client: ComfyUIClient, has_local: bool) -> list:
+    """Load ComfyUI history, keeping local media visible when it is offline."""
+    try:
+        return _load_history(client)
+    except AppError:
+        if has_local:
+            return []
+        raise
+
+
 def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
-    """Return recent generated images from ComfyUI's history.
+    """Return recent images from ComfyUI's history and the local media folder.
 
     Each entry is a dict with the image's filename, subfolder, type, proxy URL
-    and the prompt text (when available). Newest images come first. ``limit``
-    caps how many history entries are scanned.
+    and the prompt text (when available). Local media comes first, then newest
+    history images. ``limit`` caps how many files of each source are listed.
     """
-    images = []
-    for entry in _load_history(client)[:limit]:
+    images = [
+        _local_media_ref(filename, subfolder, thumbnail=True)
+        for filename, subfolder in _list_local_media(IMAGE_EXTENSIONS, limit)
+    ]
+    for entry in _gallery_history(client, bool(images))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
 
@@ -373,13 +617,17 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
 
 
 def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
-    """Return recent generated audio files from ComfyUI's history.
+    """Return recent audio from ComfyUI's history and the local media folder.
 
     Each entry is a dict with the audio's filename, subfolder, type, proxy URL
-    and the prompt text (when available). Newest audio comes first.
+    and the prompt text (when available). Local media comes first, then newest
+    history audio. ``limit`` caps how many files of each source are listed.
     """
-    audio = []
-    for entry in _load_history(client)[:limit]:
+    audio = [
+        _local_media_ref(filename, subfolder)
+        for filename, subfolder in _list_local_media(AUDIO_EXTENSIONS, limit)
+    ]
+    for entry in _gallery_history(client, bool(audio))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
 
@@ -397,14 +645,18 @@ def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
 
 
 def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
-    """Return recent generated videos from ComfyUI's history.
+    """Return recent videos from ComfyUI's history and the local media folder.
 
     ComfyUI's SaveVideo node reports its result under the "images" output key
-    (with an "animated" flag), so video files are picked out of that key by
-    their file extension.
+    (with an "animated" flag), so history video files are picked out of that key
+    by their file extension. Local media comes first, then newest history
+    videos. ``limit`` caps how many files of each source are listed.
     """
-    videos = []
-    for entry in _load_history(client)[:limit]:
+    videos = [
+        _local_media_ref(filename, subfolder, thumbnail=True)
+        for filename, subfolder in _list_local_media(VIDEO_EXTENSIONS, limit)
+    ]
+    for entry in _gallery_history(client, bool(videos))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
 
