@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import {
+  confirmDialog,
   emptyState,
   escapeHtml,
   icon,
@@ -26,9 +27,19 @@ function itemLabel(item) {
   return item.subfolder ? `${item.subfolder}/${item.filename}` : item.filename;
 }
 
+function itemKey(item) {
+  return [item.type || "", item.subfolder || "", item.filename, item.prompt_id || ""].join("\u0000");
+}
+
+function sourceBadge(item, className = "") {
+  const local = item.type === "local";
+  return `<span class="pointer-events-none inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white/85 backdrop-blur-sm ${className}">${icon(local ? "folder" : "cpu", "h-3 w-3")}${local ? "Media" : "ComfyUI"}</span>`;
+}
+
 export async function renderGallery(root, ctx, kind) {
   const meta = PAGE_META[kind];
   let items = [];
+  const selected = new Set();
   let loading = false;
 
   root.innerHTML = `
@@ -38,7 +49,11 @@ export async function renderGallery(root, ctx, kind) {
           <h2 class="text-lg font-semibold tracking-tight text-slate-100">Recent ${kind}</h2>
           <p class="mt-0.5 text-xs text-slate-500" data-count>Loading from ComfyUI history and the media folder…</p>
         </div>
-        <button class="btn-secondary btn-xs" data-refresh>${icon("refresh", "h-4 w-4")} Refresh</button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button class="btn-secondary btn-xs hidden" data-move-selected>${icon("folder", "h-4 w-4")} Move to media</button>
+          <button class="btn-danger btn-xs hidden" data-delete-selected>${icon("trash", "h-4 w-4")} Delete selected</button>
+          <button class="btn-secondary btn-xs" data-refresh>${icon("refresh", "h-4 w-4")} Refresh</button>
+        </div>
       </div>
       <div data-grid></div>
     </div>
@@ -47,6 +62,48 @@ export async function renderGallery(root, ctx, kind) {
   const grid = root.querySelector("[data-grid]");
   const count = root.querySelector("[data-count]");
   const refreshButton = root.querySelector("[data-refresh]");
+  const deleteButton = root.querySelector("[data-delete-selected]");
+  const moveButton = root.querySelector("[data-move-selected]");
+
+  function updateSelection() {
+    const chosen = items.filter((item) => selected.has(itemKey(item)));
+    const total = chosen.length;
+    const movable = chosen.filter(
+      (item) => item.type !== "local" && item.prompt_id,
+    ).length;
+    deleteButton.classList.toggle("hidden", total === 0);
+    deleteButton.disabled = loading || total === 0;
+    deleteButton.innerHTML = `${icon("trash", "h-4 w-4")} Delete selected${total ? ` (${total})` : ""}`;
+    moveButton.classList.toggle("hidden", movable === 0);
+    moveButton.disabled = loading || movable === 0;
+    moveButton.innerHTML = `${icon("folder", "h-4 w-4")} Move to media${movable ? ` (${movable})` : ""}`;
+  }
+
+  function selectionControl(index, item) {
+    return `<label class="absolute bottom-2 right-2 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-white/20 bg-black/55 backdrop-blur-sm transition hover:bg-black/75" title="Select ${escapeHtml(itemLabel(item))}">
+      <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-white/40 bg-transparent accent-accent-500" data-select-item="${index}" ${selected.has(itemKey(item)) ? "checked" : ""} aria-label="Select ${escapeHtml(itemLabel(item))}" />
+    </label>`;
+  }
+
+  function wireSelection() {
+    grid.querySelectorAll("[data-select-item]").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        const item = items[Number(checkbox.dataset.selectItem)];
+        if (!item) return;
+        if (checkbox.checked) {
+          selected.add(itemKey(item));
+        } else {
+          selected.delete(itemKey(item));
+        }
+        const container = checkbox.closest("[data-selectable]");
+        if (container) {
+          container.classList.toggle("ring-2", checkbox.checked);
+          container.classList.toggle("ring-accent-400", checkbox.checked);
+        }
+        updateSelection();
+      });
+    });
+  }
 
   function skeleton() {
     if (kind === "audio") {
@@ -108,13 +165,17 @@ export async function renderGallery(root, ctx, kind) {
         ${items
           .map(
             (item, index) => `
-            <button class="gallery-tile group aspect-square text-left" data-image="${index}" title="${escapeHtml(itemLabel(item))}">
-              <img src="${escapeHtml(item.thumbnail_url || item.url)}" data-full-src="${escapeHtml(item.url)}" alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-              <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
-                <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
-                ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
-              </span>
-            </button>
+            <div class="relative rounded-2xl transition" data-selectable>
+              <button class="gallery-tile group block aspect-square w-full text-left" data-image="${index}" title="${escapeHtml(itemLabel(item))}">
+                <img src="${escapeHtml(item.thumbnail_url || item.url)}" data-full-src="${escapeHtml(item.url)}" alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+                <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
+                  <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
+                  ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
+                </span>
+              </button>
+              ${sourceBadge(item, "absolute left-2 top-2 z-10")}
+              ${selectionControl(index, item)}
+            </div>
           `,
           )
           .join("")}
@@ -132,6 +193,7 @@ export async function renderGallery(root, ctx, kind) {
           }
         });
       });
+      wireSelection();
       return;
     }
 
@@ -139,24 +201,30 @@ export async function renderGallery(root, ctx, kind) {
       grid.innerHTML = `<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         ${items
           .map(
-            (item) => `
-            <div class="card-soft p-4">
+            (item, index) => `
+            <div class="card-soft p-4 transition" data-selectable>
               <div class="mb-3 flex items-center gap-3">
                 <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">${icon("music", "h-4 w-4")}</span>
                 <div class="min-w-0">
                   <p class="truncate text-xs font-semibold text-slate-200">${escapeHtml(itemLabel(item))}</p>
                   <p class="truncate text-[11px] text-slate-500">${escapeHtml(promptLabel(item) || sourceLabel(item, "Generated audio"))}</p>
                 </div>
+                ${sourceBadge(item, "ml-auto shrink-0")}
               </div>
               <audio class="w-full" controls preload="none" src="${escapeHtml(item.url)}"></audio>
-              <div class="mt-3 flex justify-end">
+              <div class="mt-3 flex items-center justify-between gap-3">
                 <a class="btn-ghost btn-xs" href="${escapeHtml(item.url)}" download>${icon("download", "h-4 w-4")} Download</a>
+                <label class="flex cursor-pointer items-center gap-2 text-[11px] text-slate-500" title="Select ${escapeHtml(itemLabel(item))}">
+                  <span>Select</span>
+                  <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-white/30 bg-transparent accent-accent-500" data-select-item="${index}" ${selected.has(itemKey(item)) ? "checked" : ""} aria-label="Select ${escapeHtml(itemLabel(item))}" />
+                </label>
               </div>
             </div>
           `,
           )
           .join("")}
       </div>`;
+      wireSelection();
       return;
     }
 
@@ -164,23 +232,27 @@ export async function renderGallery(root, ctx, kind) {
       ${items
         .map(
           (item, index) => `
-          <button class="gallery-tile group aspect-square text-left" data-video="${index}" title="${escapeHtml(itemLabel(item))}">
-            <span class="absolute inset-0 flex items-center justify-center text-slate-600">${icon("film", "h-8 w-8")}</span>
-            ${
-              item.thumbnail_url
-                ? `<img src="${escapeHtml(item.thumbnail_url)}" data-thumbnail alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />`
-                : ""
-            }
-            <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
-              <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm">
-                ${icon("play", "h-5 w-5")}
+          <div class="relative rounded-2xl transition" data-selectable>
+            <button class="gallery-tile group block aspect-square w-full text-left" data-video="${index}" title="${escapeHtml(itemLabel(item))}">
+              <span class="absolute inset-0 flex items-center justify-center text-slate-600">${icon("film", "h-8 w-8")}</span>
+              ${
+                item.thumbnail_url
+                  ? `<img src="${escapeHtml(item.thumbnail_url)}" data-thumbnail alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />`
+                  : ""
+              }
+              <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
+                <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm">
+                  ${icon("play", "h-5 w-5")}
+                </span>
               </span>
-            </span>
-            <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
-              <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
-              ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
-            </span>
-          </button>
+              <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
+                <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
+                ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
+              </span>
+            </button>
+            ${sourceBadge(item, "absolute left-2 top-2 z-10")}
+            ${selectionControl(index, item)}
+          </div>
         `,
         )
         .join("")}
@@ -191,11 +263,133 @@ export async function renderGallery(root, ctx, kind) {
     grid.querySelectorAll("img[data-thumbnail]").forEach((image) => {
       image.addEventListener("error", () => image.remove());
     });
+    wireSelection();
+  }
+
+  async function moveSelected() {
+    if (loading) return;
+    const chosen = items.filter((item) => selected.has(itemKey(item)));
+    const movable = chosen.filter(
+      (item) => item.type !== "local" && item.prompt_id,
+    );
+    const localCount = chosen.length - movable.length;
+    if (!movable.length) return;
+
+    const promptIds = new Set(movable.map((item) => item.prompt_id));
+    let message = `Move ${movable.length} selected item${movable.length === 1 ? "" : "s"} to the media folder? This copies all outputs from ${promptIds.size} ComfyUI generation${promptIds.size === 1 ? "" : "s"} and removes those history entries.`;
+    if (localCount) {
+      message += ` ${localCount} local item${localCount === 1 ? "" : "s"} in the selection are already in the media folder and will be left untouched.`;
+    }
+
+    const okay = await confirmDialog(message, {
+      title: "Move selected media?",
+      confirmLabel: "Move",
+    });
+    if (!okay) return;
+
+    moveButton.disabled = true;
+    moveButton.innerHTML = `${spinner("h-4 w-4")} Moving…`;
+    try {
+      const result = await api("/api/gallery/move", {
+        method: "POST",
+        body: {
+          items: movable.map((item) => ({
+            filename: item.filename,
+            subfolder: item.subfolder || "",
+            type: item.type || "",
+            prompt_id: item.prompt_id,
+          })),
+        },
+      });
+      const parts = [];
+      if (result?.moved) {
+        parts.push(`${result.moved} file${result.moved === 1 ? "" : "s"} moved`);
+      }
+      if (result?.deleted_history) {
+        parts.push(`${result.deleted_history} history entr${result.deleted_history === 1 ? "y" : "ies"} removed`);
+      }
+      if (result?.failed) {
+        parts.push(`${result.failed} entr${result.failed === 1 ? "y" : "ies"} could not be completed`);
+      }
+      toast(
+        parts.length ? `${parts.join(", ")}.` : "Move complete.",
+        result?.failed ? "warning" : "success",
+      );
+      selected.clear();
+      await load();
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      moveButton.disabled = loading || selected.size === 0;
+      updateSelection();
+    }
+  }
+
+  async function deleteSelected() {
+    if (loading || !selected.size) return;
+    const chosen = items.filter((item) => selected.has(itemKey(item)));
+    if (!chosen.length) {
+      selected.clear();
+      updateSelection();
+      return;
+    }
+
+    const promptIds = new Set(
+      chosen.filter((item) => item.prompt_id).map((item) => item.prompt_id),
+    );
+    const localCount = chosen.filter((item) => item.type === "local").length;
+    let message = `Delete ${chosen.length} selected item${chosen.length === 1 ? "" : "s"}?`;
+    if (promptIds.size) {
+      message += ` This removes ${promptIds.size} ComfyUI history ${promptIds.size === 1 ? "entry" : "entries"}; all outputs from those entries are removed.`;
+    }
+    if (localCount) {
+      message += ` ${localCount} local media file${localCount === 1 ? "" : "s"} will be permanently deleted from the media folder.`;
+    }
+
+    const okay = await confirmDialog(message, {
+      title: "Delete selected media?",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!okay) return;
+
+    deleteButton.disabled = true;
+    deleteButton.innerHTML = `${spinner("h-4 w-4")} Deleting…`;
+    try {
+      const result = await api("/api/gallery/delete", {
+        method: "POST",
+        body: {
+          items: chosen.map((item) => ({
+            filename: item.filename,
+            subfolder: item.subfolder || "",
+            type: item.type || "",
+            prompt_id: item.prompt_id || "",
+          })),
+        },
+      });
+      const parts = [];
+      if (result?.deleted_history) {
+        parts.push(`${result.deleted_history} history ${result.deleted_history === 1 ? "entry" : "entries"}`);
+      }
+      if (result?.deleted_local) {
+        parts.push(`${result.deleted_local} local ${result.deleted_local === 1 ? "file" : "files"}`);
+      }
+      toast(parts.length ? `Deleted ${parts.join(" and ")}.` : "Deleted selected items.", "success");
+      selected.clear();
+      await load();
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      deleteButton.disabled = loading || selected.size === 0;
+      updateSelection();
+    }
   }
 
   async function load() {
     if (loading) return;
     loading = true;
+    selected.clear();
+    updateSelection();
     refreshButton.disabled = true;
     refreshButton.innerHTML = `${spinner("h-4 w-4")} Loading`;
     grid.innerHTML = skeleton();
@@ -216,10 +410,13 @@ export async function renderGallery(root, ctx, kind) {
       loading = false;
       refreshButton.disabled = false;
       refreshButton.innerHTML = `${icon("refresh", "h-4 w-4")} Refresh`;
+      updateSelection();
     }
   }
 
   refreshButton.addEventListener("click", load);
+  moveButton.addEventListener("click", moveSelected);
+  deleteButton.addEventListener("click", deleteSelected);
   await load();
 
   return () => {};

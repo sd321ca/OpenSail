@@ -159,6 +159,96 @@ def _local_media_ref(
     return ref
 
 
+def _history_media_refs(entry: dict) -> list[dict]:
+    """Return the unique media file references in a history entry."""
+    refs = []
+    seen = set()
+    for node_output in entry.get("outputs", {}).values():
+        for key in ("images", "audio", "video"):
+            for raw in node_output.get(key) or []:
+                if not isinstance(raw, dict):
+                    continue
+                filename = raw.get("filename")
+                if not filename:
+                    continue
+                ref = {
+                    "filename": filename,
+                    "subfolder": raw.get("subfolder", ""),
+                    "type": raw.get("type", "output"),
+                }
+                signature = (ref["filename"], ref["subfolder"], ref["type"])
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                refs.append(ref)
+    return refs
+
+
+def _move_target(filename: str) -> str:
+    """Choose a non-colliding destination inside the local media folder."""
+    os.makedirs(LOCAL_MEDIA_DIR, exist_ok=True)
+    name = os.path.basename(filename or "") or "media"
+    stem, extension = os.path.splitext(name)
+    target = os.path.join(LOCAL_MEDIA_DIR, name)
+    counter = 1
+    while os.path.exists(target):
+        target = os.path.join(
+            LOCAL_MEDIA_DIR, f"{stem} ({counter}){extension}"
+        )
+        counter += 1
+    return target
+
+
+def move_history_to_media(
+    client: ComfyUIClient, prompt_ids: list[str]
+) -> dict:
+    """Copy history outputs to the media folder and drop moved entries.
+
+    Every output of each selected history entry is copied, so batch siblings
+    are preserved even when only one tile was selected. An entry is removed
+    from ComfyUI's history only after all of its files were copied.
+    """
+    history = client.get_history()
+    moved = 0
+    failed = 0
+    deleted = 0
+
+    for prompt_id in dict.fromkeys(prompt_ids):
+        entry = history.get(prompt_id)
+        if not isinstance(entry, dict):
+            failed += 1
+            continue
+        refs = _history_media_refs(entry)
+        if not refs:
+            failed += 1
+            continue
+
+        copied = []
+        try:
+            for ref in refs:
+                target = _move_target(ref["filename"])
+                client.download_file(ref, target)
+                copied.append(target)
+                moved += 1
+        except Exception:  # noqa: BLE001 - keep the history entry intact
+            for path in copied:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            moved -= len(copied)
+            failed += 1
+            continue
+
+        try:
+            client.delete_history([prompt_id])
+            deleted += 1
+        except Exception:  # noqa: BLE001 - files are already safe in media
+            failed += 1
+
+    return {"moved": moved, "failed": failed, "deleted_history": deleted}
+
+
 def _thumbnail_name(filename: str) -> str | None:
     """Return the safe, flat filename used for a cached thumbnail."""
     name = os.path.basename(filename or "")
@@ -353,6 +443,28 @@ def _local_thumbnail_path(source_path: str) -> str | None:
     )
 
 
+def delete_local_media(subfolder: str, filename: str) -> bool:
+    """Delete a local media file and its cached thumbnail.
+
+    Returns True when the source file was removed. Paths are resolved through
+    :func:`local_media_path`, so only files inside the media folder qualify.
+    """
+    path = local_media_path(subfolder, filename)
+    if path is None:
+        return False
+    target = _local_thumbnail_path(path)
+    try:
+        os.remove(path)
+    except OSError:
+        return False
+    if target is not None:
+        try:
+            os.remove(target)
+        except OSError:
+            pass
+    return True
+
+
 def _write_image_file_thumbnail(source_path: str, target: str) -> bool:
     """Downscale an image file and write it as a compact JPEG."""
     try:
@@ -531,8 +643,8 @@ def cleanup_orphaned_thumbnails(
     return removed
 
 
-def _sorted_history(history: dict) -> list:
-    """Return history entries sorted newest-first.
+def _sorted_history(history: dict) -> list[tuple[str, dict]]:
+    """Return ``(prompt_id, entry)`` pairs sorted newest-first.
 
     History is keyed by prompt_id. Each entry's "prompt" is a list shaped like
     [queue_number, prompt_id, prompt_dict, extra_data, outputs]. Sort by the
@@ -540,14 +652,15 @@ def _sorted_history(history: dict) -> list:
     """
 
     def sort_key(item):
-        prompt_meta = item.get("prompt")
+        _prompt_id, entry = item
+        prompt_meta = entry.get("prompt")
         if isinstance(prompt_meta, list) and prompt_meta and isinstance(
             prompt_meta[0], (int, float)
         ):
             return prompt_meta[0]
         return 0
 
-    return sorted(history.values(), key=sort_key, reverse=True)
+    return sorted(history.items(), key=sort_key, reverse=True)
 
 
 def _prompt_text(entry: dict) -> str:
@@ -562,7 +675,7 @@ def _prompt_text(entry: dict) -> str:
     return ""
 
 
-def _load_history(client: ComfyUIClient) -> list:
+def _load_history(client: ComfyUIClient) -> list[tuple[str, dict]]:
     try:
         return _sorted_history(client.get_history())
     except Exception as exc:  # noqa: BLE001
@@ -571,7 +684,9 @@ def _load_history(client: ComfyUIClient) -> list:
         ) from exc
 
 
-def _gallery_history(client: ComfyUIClient, has_local: bool) -> list:
+def _gallery_history(
+    client: ComfyUIClient, has_local: bool
+) -> list[tuple[str, dict]]:
     """Load ComfyUI history, keeping local media visible when it is offline."""
     try:
         return _load_history(client)
@@ -592,7 +707,7 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
         _local_media_ref(filename, subfolder, thumbnail=True)
         for filename, subfolder in _list_local_media(IMAGE_EXTENSIONS, limit)
     ]
-    for entry in _gallery_history(client, bool(images))[:limit]:
+    for prompt_id, entry in _gallery_history(client, bool(images))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
 
@@ -606,6 +721,7 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
                     "filename": image_ref.get("filename", ""),
                     "subfolder": image_ref.get("subfolder", ""),
                     "type": image_ref.get("type", "output"),
+                    "prompt_id": prompt_id,
                     "prompt": prompt_text,
                 }
                 ref["url"] = file_proxy_url(ref)
@@ -627,7 +743,7 @@ def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
         _local_media_ref(filename, subfolder)
         for filename, subfolder in _list_local_media(AUDIO_EXTENSIONS, limit)
     ]
-    for entry in _gallery_history(client, bool(audio))[:limit]:
+    for prompt_id, entry in _gallery_history(client, bool(audio))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
 
@@ -637,6 +753,7 @@ def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
                     "filename": audio_ref.get("filename", ""),
                     "subfolder": audio_ref.get("subfolder", ""),
                     "type": audio_ref.get("type", "output"),
+                    "prompt_id": prompt_id,
                     "prompt": prompt_text,
                 }
                 ref["url"] = file_proxy_url(ref)
@@ -656,7 +773,7 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
         _local_media_ref(filename, subfolder, thumbnail=True)
         for filename, subfolder in _list_local_media(VIDEO_EXTENSIONS, limit)
     ]
-    for entry in _gallery_history(client, bool(videos))[:limit]:
+    for prompt_id, entry in _gallery_history(client, bool(videos))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
 
@@ -668,6 +785,7 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
                     "filename": video_ref.get("filename", ""),
                     "subfolder": video_ref.get("subfolder", ""),
                     "type": video_ref.get("type", "output"),
+                    "prompt_id": prompt_id,
                     "prompt": prompt_text,
                 }
                 ref["url"] = file_proxy_url(ref)

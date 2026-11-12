@@ -274,7 +274,15 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   reused as inputs on the Generate page. The folder is created automatically on
   startup. Local images and videos get cached thumbnails in
   `thumbnails/local/`, generated on demand the first time a tile is viewed and
-  refreshed when the source file changes.
+  refreshed when the source file changes. Each item is labelled **Media** or
+  **ComfyUI** so its source is clear. Tick the checkbox in an item's bottom-right
+  corner to select it; **Move to media** and **Delete selected** buttons appear
+  in the header. Deleting removes the selected entries from
+  ComfyUI's history (all outputs from the same generation are removed
+  together), and local media files are deleted from the `media/` folder. Moving
+  copies every output of the selected ComfyUI generations into `media/` and
+  removes those history entries, keeping the content safe from ComfyUI's own
+  cleanup.
 
   <img width="375" height="687" alt="gallery2" src="https://github.com/user-attachments/assets/38088c6f-180e-4fec-afdf-06bf7264449c" />
 

@@ -446,3 +446,52 @@ class ComfyUIClient:
         resp = requests.get(f"{self.base_url}/history", timeout=self.timeout)
         resp.raise_for_status()
         return resp.json()
+
+    def delete_history(self, prompt_ids: list[str]) -> None:
+        """Remove history entries for the given prompt ids."""
+        ids = [prompt_id for prompt_id in dict.fromkeys(prompt_ids) if prompt_id]
+        if not ids:
+            return
+        resp = requests.post(
+            f"{self.base_url}/history",
+            json={"delete": ids},
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+
+    def download_file(
+        self,
+        ref: dict,
+        target: str,
+        timeout: float = 300.0,
+    ) -> None:
+        """Download a ComfyUI output file to ``target``.
+
+        The bytes are written to a temporary sibling first, then renamed into
+        place, so a failed download never leaves a partial destination file.
+        """
+        params = {
+            "filename": ref["filename"],
+            "subfolder": ref.get("subfolder", ""),
+            "type": ref.get("type", "output"),
+        }
+        temporary = f"{target}.part"
+        try:
+            with requests.get(
+                f"{self.base_url}/view",
+                params=params,
+                stream=True,
+                timeout=timeout,
+            ) as resp:
+                resp.raise_for_status()
+                with open(temporary, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+            os.replace(temporary, target)
+        except Exception:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+            raise

@@ -73,12 +73,14 @@ from .gallery import (
     IMAGE_EXTENSIONS,
     LOCAL_MEDIA_TYPE,
     cleanup_orphaned_thumbnails,
+    delete_local_media,
     ensure_local_thumbnail,
     file_proxy_url,
     list_gallery_audio,
     list_gallery_images,
     list_gallery_videos,
     local_media_path,
+    move_history_to_media,
     save_image_thumbnail,
     save_video_thumbnail,
     thumbnail_path,
@@ -478,6 +480,17 @@ class GenerateBody(BaseModel):
     images: list[Optional[MediaRef]] = []
     audio: Optional[MediaRef] = None
     video: Optional[MediaRef] = None
+
+
+class GalleryItemRef(BaseModel):
+    filename: str = ""
+    subfolder: str = ""
+    type: str = ""
+    prompt_id: str = ""
+
+
+class GallerySelectionBody(BaseModel):
+    items: list[GalleryItemRef] = []
 
 
 class ChatMessage(BaseModel):
@@ -1245,6 +1258,61 @@ def gallery_audio(limit: int = Query(200, ge=1, le=1000)) -> dict:
 def gallery_videos(limit: int = Query(200, ge=1, le=1000)) -> dict:
     _cleanup_thumbnails()
     return {"items": list_gallery_videos(client, limit=limit)}
+
+
+@app.post("/api/gallery/delete")
+def gallery_delete(body: GallerySelectionBody) -> dict:
+    """Delete selected ComfyUI history entries and local media files."""
+    prompt_ids = []
+    local_items = []
+    for item in body.items:
+        if item.type == LOCAL_MEDIA_TYPE:
+            local_items.append(item)
+        elif item.prompt_id:
+            prompt_ids.append(item.prompt_id)
+
+    prompt_ids = list(dict.fromkeys(prompt_ids))
+    if prompt_ids:
+        try:
+            client.delete_history(prompt_ids)
+        except Exception as exc:  # noqa: BLE001
+            raise AppError(
+                f"Could not delete from ComfyUI history: {exc}"
+            ) from exc
+
+    deleted_local = sum(
+        1
+        for item in local_items
+        if delete_local_media(item.subfolder, item.filename)
+    )
+    if not prompt_ids and not deleted_local:
+        raise AppError("None of the selected items could be deleted.")
+    return {
+        "deleted_history": len(prompt_ids),
+        "deleted_local": deleted_local,
+    }
+
+
+@app.post("/api/gallery/move")
+def gallery_move(body: GallerySelectionBody) -> dict:
+    """Copy selected history outputs into the media folder and clear them."""
+    prompt_ids = [
+        item.prompt_id
+        for item in body.items
+        if item.type != LOCAL_MEDIA_TYPE and item.prompt_id
+    ]
+    prompt_ids = list(dict.fromkeys(prompt_ids))
+    if not prompt_ids:
+        raise AppError("Select one or more ComfyUI items to move.")
+
+    try:
+        result = move_history_to_media(client, prompt_ids)
+    except Exception as exc:  # noqa: BLE001
+        raise AppError(f"Could not move media to the media folder: {exc}") from exc
+
+    if not result["moved"] and not result["deleted_history"]:
+        raise AppError("None of the selected items could be moved.")
+    return result
 
 
 @app.get("/api/gallery/thumbnail")
