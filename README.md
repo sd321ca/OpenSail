@@ -250,9 +250,11 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
   press **Unload** to stop it and free VRAM before running a ComfyUI workflow.
 - **Image Gallery** — browse previously generated images pulled from ComfyUI's
   history. Use **Refresh** to reload and the slider to cap how many images are
-  loaded. Click a thumbnail to preview it full size. Images generated through
-  the Generate page get a compact JPEG preview in the `thumbnails/` folder,
-  which the grid uses instead of loading the full-size image.
+  loaded. Click a thumbnail to preview it full size; the preview also shows the
+  ComfyUI metadata embedded in the file (model, prompts, sampler settings and
+  the raw prompt/workflow JSON). Images generated through the Generate page get
+  a compact JPEG preview in the `thumbnails/` folder, which the grid uses
+  instead of loading the full-size image.
 - **Audio Gallery** — browse previously generated audio (e.g. songs) pulled
   from ComfyUI's history. Each file is shown as an inline audio player labelled
   with the generation metadata embedded in the file (style, mode, duration,

@@ -85,6 +85,7 @@ from .gallery import (
     save_video_thumbnail,
     thumbnail_path,
 )
+from .image_meta import extract_image_metadata, extract_image_metadata_path
 from .models import CHAT_MODELS, DEFAULT_CHAT_MODEL_PATH
 from .notes import get_workflow_notes, save_workflow_notes
 from .personas import delete_persona, get_personas, save_persona
@@ -1247,6 +1248,34 @@ def cancel_generation() -> dict:
 def gallery_images(limit: int = Query(200, ge=1, le=1000)) -> dict:
     _cleanup_thumbnails()
     return {"items": list_gallery_images(client, limit=limit)}
+
+
+@app.get("/api/gallery/image-metadata")
+def gallery_image_metadata(
+    filename: str,
+    subfolder: str = "",
+    type: str = "output",
+) -> dict:
+    """Return the ComfyUI generation metadata embedded in a gallery image."""
+    if type == LOCAL_MEDIA_TYPE:
+        path = local_media_path(subfolder, filename)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Media file not found.")
+        return {
+            "filename": filename,
+            "metadata": extract_image_metadata_path(path),
+        }
+
+    try:
+        content, _content_type = client.fetch_image_bytes(
+            {"filename": filename, "subfolder": subfolder, "type": type}
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise AppError(
+            f"Could not read metadata from ComfyUI at {COMFY_URL}: {exc}"
+        ) from exc
+
+    return {"filename": filename, "metadata": extract_image_metadata(content)}
 
 
 @app.get("/api/gallery/audio")
