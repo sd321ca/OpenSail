@@ -1,5 +1,5 @@
-import { api, uploadFile } from "../api.js";
-import { openAudioTrimmer } from "../audio.js";
+import { api, errorText, uploadFile } from "../api";
+import { openAudioTrimmer } from "../audio";
 import {
   clamp,
   confirmDialog,
@@ -8,23 +8,42 @@ import {
   icon,
   openModal,
   plainText,
+  queryElement,
   renderMarkdown,
   setButtonBusy,
   spinner,
   toast,
-} from "../ui.js";
+} from "../ui";
+import type {
+  GalleryResponse,
+  GenerationResult,
+  GenerationSnapshot,
+  MediaRef,
+  NodeCandidate,
+  RenderContext,
+  WorkflowConfig,
+  WorkflowKind,
+  WorkflowNodeRef,
+} from "../types";
 
-const KIND_LABELS = {
+const KIND_LABELS: Record<WorkflowKind, string> = {
   image: "Image",
   audio: "Audio",
   video: "Video",
 };
 
-function workflowUrl(name) {
+function workflowUrl(name: string): string {
   return `/api/workflows/${encodeURIComponent(name)}`;
 }
 
-function candidateValues(config, values) {
+interface ValuesMap {
+  [bindingId: string]: unknown;
+}
+
+function candidateValues(
+  config: WorkflowConfig | null,
+  values: ValuesMap,
+): ValuesMap {
   // Keep values for every candidate, including hidden ones. Hiding a control
   // should not reset its last value back to the workflow JSON default.
   const candidates = new Set(
@@ -35,14 +54,17 @@ function candidateValues(config, values) {
   );
 }
 
-function selectedValues(config, values) {
+function selectedValues(
+  config: WorkflowConfig | null,
+  values: ValuesMap,
+): ValuesMap {
   const selected = new Set(config?.selected || []);
   return Object.fromEntries(
     Object.entries(values || {}).filter(([id]) => selected.has(id)),
   );
 }
 
-function refPayload(ref) {
+function refPayload(ref: MediaRef | null): unknown {
   if (!ref) return null;
   if (ref.upload) return { upload: ref.upload, gallery: null };
   if (ref.gallery) {
@@ -61,7 +83,35 @@ function refPayload(ref) {
 /* A run belongs to the server, not to the Generate page. The dashboard polls
    the job status, so navigating away, reloading, or turning the phone screen
    off all resume the progress bar instead of losing the run. */
-const job = {
+interface JobProgress {
+  value: number;
+  message: string;
+  indeterminate: boolean;
+}
+
+interface JobSnapshot {
+  running: boolean;
+  result: GenerationResult | null;
+  error: string;
+  progress: JobProgress | null;
+  workflow: string | null;
+  elapsedMs: number;
+  doneAt: number;
+}
+
+type JobListener = (snapshot: JobSnapshot) => void;
+
+const job: {
+  running: boolean;
+  result: GenerationResult | null;
+  error: string;
+  progress: JobProgress | null;
+  workflow: string | null;
+  startedAt: number;
+  elapsedMs: number;
+  doneAt: number;
+  listeners: Set<JobListener>;
+} = {
   running: false,
   result: null,
   error: "",
@@ -70,20 +120,20 @@ const job = {
   startedAt: 0,
   elapsedMs: 0,
   doneAt: 0,
-  listeners: new Set(),
+  listeners: new Set<JobListener>(),
 };
 
 const JOB_POLL_INTERVAL = 500;
-let pollTimer = null;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollInFlight = false;
 
-function jobElapsed() {
+function jobElapsed(): number {
   return job.running && job.startedAt
     ? performance.now() - job.startedAt
     : job.elapsedMs;
 }
 
-function jobSnapshot() {
+function jobSnapshot(): JobSnapshot {
   return {
     running: job.running,
     result: job.result,
@@ -95,7 +145,7 @@ function jobSnapshot() {
   };
 }
 
-function notifyJob() {
+function notifyJob(): void {
   const snapshot = jobSnapshot();
   for (const listener of [...job.listeners]) {
     try {
@@ -106,13 +156,15 @@ function notifyJob() {
   }
 }
 
-function subscribeJob(listener) {
+function subscribeJob(listener: JobListener): () => void {
   job.listeners.add(listener);
   listener(jobSnapshot());
-  return () => job.listeners.delete(listener);
+  return () => {
+    job.listeners.delete(listener);
+  };
 }
 
-function finishJob() {
+function finishJob(): void {
   if (job.startedAt) {
     job.elapsedMs = performance.now() - job.startedAt;
     job.startedAt = 0;
@@ -120,17 +172,19 @@ function finishJob() {
   job.running = false;
 }
 
-function stopPolling() {
+function stopPolling(): void {
   if (pollTimer) clearTimeout(pollTimer);
   pollTimer = null;
 }
 
-function schedulePoll(delay = JOB_POLL_INTERVAL) {
+function schedulePoll(delay = JOB_POLL_INTERVAL): void {
   if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = setTimeout(pollJob, delay);
+  pollTimer = setTimeout(() => {
+    void pollJob();
+  }, delay);
 }
 
-function applyJobSnapshot(snapshot) {
+function applyJobSnapshot(snapshot: GenerationSnapshot): void {
   const wasRunning = job.running;
   const previousError = job.error;
   const elapsed = Number(snapshot.elapsed_ms) || 0;
@@ -141,7 +195,7 @@ function applyJobSnapshot(snapshot) {
   job.result = snapshot.result || null;
   if (snapshot.progress) {
     job.progress = {
-      value: snapshot.progress.value,
+      value: Number(snapshot.progress.value) || 0,
       message: snapshot.progress.message || "",
       indeterminate: Boolean(snapshot.progress.indeterminate),
     };
@@ -178,7 +232,7 @@ function applyJobSnapshot(snapshot) {
   else stopPolling();
 }
 
-async function pollJob() {
+async function pollJob(): Promise<void> {
   pollTimer = null;
   if (!job.running) return;
   if (pollInFlight) {
@@ -187,8 +241,8 @@ async function pollJob() {
   }
   pollInFlight = true;
   try {
-    applyJobSnapshot(await api("/api/generate/status"));
-  } catch (_error) {
+    applyJobSnapshot(await api<GenerationSnapshot>("/api/generate/status"));
+  } catch {
     // A phone dropping the request while its screen is off is expected: keep
     // the last progress visible and try again. The job runs on the server.
     if (job.running) schedulePoll(JOB_POLL_INTERVAL * 2);
@@ -197,15 +251,15 @@ async function pollJob() {
   }
 }
 
-async function refreshJob() {
+async function refreshJob(): Promise<JobSnapshot> {
   if (pollInFlight) {
     schedulePoll(0);
     return jobSnapshot();
   }
   pollInFlight = true;
   try {
-    applyJobSnapshot(await api("/api/generate/status"));
-  } catch (_error) {
+    applyJobSnapshot(await api<GenerationSnapshot>("/api/generate/status"));
+  } catch {
     // Leave the local state untouched if the server is unavailable, but keep
     // retrying when a run is still live on the server.
     if (job.running) schedulePoll(JOB_POLL_INTERVAL * 2);
@@ -215,7 +269,7 @@ async function refreshJob() {
   return jobSnapshot();
 }
 
-async function startGeneration(payload) {
+async function startGeneration(payload: { workflow?: string | null }): Promise<void> {
   stopPolling();
   job.running = true;
   job.result = null;
@@ -229,20 +283,20 @@ async function startGeneration(payload) {
 
   try {
     applyJobSnapshot(
-      await api("/api/generate", { method: "POST", body: payload }),
+      await api<GenerationSnapshot>("/api/generate", { method: "POST", body: payload }),
     );
   } catch (error) {
-    if (error.status === 409) {
+    if ((error as { status?: number }).status === 409) {
       // Another run is already live (for example after a rapid reload);
       // attach to it instead of reporting a failure.
       try {
-        applyJobSnapshot(await api("/api/generate/status"));
+        applyJobSnapshot(await api<GenerationSnapshot>("/api/generate/status"));
         return;
-      } catch (_statusError) {
+      } catch {
         // Fall through to the error below.
       }
     }
-    job.error = error.message || "Generation failed.";
+    job.error = errorText(error) || "Generation failed.";
     finishJob();
     toast(job.error, "error");
     notifyJob();
@@ -253,30 +307,46 @@ async function startGeneration(payload) {
 // the page is visible again instead of waiting for the next scheduled poll.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    refreshJob();
+    void refreshJob();
   }
 });
 
-export async function renderGenerate(root, ctx) {
+export async function renderGenerate(
+  root: HTMLElement,
+  ctx: RenderContext,
+): Promise<() => void> {
   // Recover a run that outlived this page (navigation, reload, phone screen
   // off) before choosing which workflow to show.
   await refreshJob();
 
-  const workflows = ctx.boot.workflows || [];
-  let config = null;
-  let workflow = ctx.boot.default_workflow || workflows[0]?.name || null;
+  const boot = ctx.boot;
+  if (!boot) throw new Error("Generate page requires the bootstrap payload.");
+  const workflows = boot.workflows || [];
+  let config: WorkflowConfig | null = null;
+  let workflow: string | null = boot.default_workflow || workflows[0]?.name || null;
   // Reopen on the workflow of the last run so a returning page matches the
   // progress it is about to show.
   if (job.workflow && (job.running || job.result || job.error)) {
     workflow = job.workflow;
   }
   let randomize = true;
-  let selectedPreset = null;
+  let selectedPreset: string | null = null;
   let notesCollapsed = false;
   // Ignore a previous run's output when it belongs to another workflow.
   const lastRunMatches = Boolean(workflow) && job.workflow === workflow;
 
-  const state = {
+  const state: {
+    values: ValuesMap;
+    images: Array<MediaRef | null>;
+    audio: MediaRef | null;
+    video: MediaRef | null;
+    running: boolean;
+    result: GenerationResult | null;
+    error: string;
+    elapsedMs: number;
+    timer: ReturnType<typeof setInterval> | null;
+    unsubscribe: (() => void) | null;
+  } = {
     values: {},
     images: [],
     audio: null,
@@ -385,22 +455,23 @@ export async function renderGenerate(root, ctx) {
     </div>
   `;
 
-  const $ = (selector) => root.querySelector(selector);
-  const workflowSelect = $("[data-workflow-select]");
+  const $ = <T extends Element = HTMLElement>(selector: string): T =>
+    queryElement<T>(root, selector);
+  const workflowSelect = root.querySelector<HTMLSelectElement>("[data-workflow-select]");
   const presetsCard = $("[data-presets-card]");
   const inputsCard = $("[data-inputs-card]");
   const notesCard = $("[data-notes-card]");
   const controls = $("[data-controls]");
   const result = $("[data-result]");
-  const generateButton = $("[data-generate]");
-  const stopButton = $("[data-stop]");
+  const generateButton = $<HTMLButtonElement>("[data-generate]");
+  const stopButton = $<HTMLButtonElement>("[data-stop]");
   const progressWrap = $("[data-progress-wrap]");
   const progressBar = $("[data-progress-bar]");
   const progressLabel = $("[data-progress-label]");
   const progressPercent = $("[data-progress-percent]");
   const progressTime = $("[data-progress-time]");
   const resultTime = $("[data-result-time]");
-  const resultOpen = $("[data-result-open]");
+  const resultOpen = $<HTMLAnchorElement>("[data-result-open]");
 
   if (workflowSelect) workflowSelect.value = workflow || "";
 
@@ -408,9 +479,9 @@ export async function renderGenerate(root, ctx) {
   /* Progress                                                         */
   /* ---------------------------------------------------------------- */
 
-  function updateProgress(value, message, indeterminate = false) {
+  function updateProgress(value: unknown, message: unknown, indeterminate = false): void {
     progressWrap.classList.remove("hidden");
-    progressLabel.textContent = message || "";
+    progressLabel.textContent = typeof message === "string" ? message : "";
     if (indeterminate) {
       progressBar.classList.add("animate-pulse");
       progressBar.style.width = "38%";
@@ -419,7 +490,8 @@ export async function renderGenerate(root, ctx) {
     } else {
       progressBar.classList.remove("animate-pulse");
       progressBar.style.transform = "none";
-      const percent = Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+      const ratio = Number(value) || 0;
+      const percent = Math.round(Math.max(0, Math.min(1, ratio)) * 100);
       progressBar.style.width = `${percent}%`;
       progressPercent.textContent = `${percent}%`;
     }
@@ -432,7 +504,7 @@ export async function renderGenerate(root, ctx) {
     progressTime.textContent = "";
   }
 
-  function formatDuration(ms) {
+  function formatDuration(ms: number): string {
     const seconds = Math.max(0, ms) / 1000;
     if (seconds < 60) return `${seconds.toFixed(1)}s`;
     const minutes = Math.floor(seconds / 60);
@@ -440,7 +512,7 @@ export async function renderGenerate(root, ctx) {
     return `${minutes}m ${String(remainder).padStart(2, "0")}s`;
   }
 
-  function setResultTime(ms) {
+  function setResultTime(ms: number): void {
     if (!resultTime) return;
     if (!ms) {
       resultTime.classList.add("hidden");
@@ -472,7 +544,7 @@ export async function renderGenerate(root, ctx) {
 
   let lastRenderKey = "";
 
-  function syncFromJob(snapshot) {
+  function syncFromJob(snapshot: JobSnapshot): void {
     // The server keeps one global job, so its last result may belong to a
     // different workflow. Only surface output for the workflow on screen.
     const matchesWorkflow = Boolean(workflow) && snapshot.workflow === workflow;
@@ -583,7 +655,7 @@ export async function renderGenerate(root, ctx) {
     const item = state.result;
     setResultTime(state.elapsedMs);
     $("[data-result-subtitle]").textContent = item.filename || "Generated result";
-    resultOpen.href = item.url;
+    resultOpen.href = item.url || "";
     resultOpen.classList.remove("hidden");
 
     if (item.kind === "image") {
@@ -676,12 +748,13 @@ export async function renderGenerate(root, ctx) {
     });
   }
 
-  function renderPresets() {
+  function renderPresets(): void {
     if (!config) return;
+    const cfg = config;
     presetsCard.classList.remove("hidden");
-    const names = config.preset_names || [];
+    const names = cfg.preset_names || [];
     if (!selectedPreset || !names.includes(selectedPreset)) {
-      selectedPreset = config.default_preset || names[0] || "";
+      selectedPreset = cfg.default_preset || names[0] || "";
     }
     presetsCard.innerHTML = `
       <details class="group" ${names.length ? "" : "open"}>
@@ -698,7 +771,7 @@ export async function renderGenerate(root, ctx) {
         <div class="space-y-3 border-t border-subtle p-4 sm:p-5">
           <div class="flex gap-2">
             <select class="select min-w-0 flex-1" data-preset-select aria-label="Saved preset">
-              ${names.length ? names.map((name) => `<option value="${escapeHtml(name)}" ${name === selectedPreset ? "selected" : ""}>${escapeHtml(name)}${name === config.default_preset ? " (default)" : ""}</option>`).join("") : `<option value="">No presets yet</option>`}
+              ${names.length ? names.map((name) => `<option value="${escapeHtml(name)}" ${name === selectedPreset ? "selected" : ""}>${escapeHtml(name)}${name === cfg.default_preset ? " (default)" : ""}</option>`).join("") : `<option value="">No presets yet</option>`}
             </select>
             <button class="btn-secondary btn-xs shrink-0" data-preset-load ${names.length ? "" : "disabled"}>Load</button>
           </div>
@@ -715,14 +788,21 @@ export async function renderGenerate(root, ctx) {
       </details>
     `;
 
-    const presetSelect = presetsCard.querySelector("[data-preset-select]");
+    const presetSelect = presetsCard.querySelector<HTMLSelectElement>("[data-preset-select]");
     presetSelect?.addEventListener("change", () => {
       selectedPreset = presetSelect.value;
     });
 
     presetsCard.querySelector("[data-preset-load]")?.addEventListener("click", () => {
+      if (!config || !selectedPreset) {
+        toast("Choose a preset first.", "warning");
+        return;
+      }
       const values = config.presets[selectedPreset];
-      if (!values) return toast("Choose a preset first.", "warning");
+      if (!values) {
+        toast("Choose a preset first.", "warning");
+        return;
+      }
       for (const candidate of config.candidates) {
         if (Object.prototype.hasOwnProperty.call(values, candidate.id)) {
           state.values[candidate.id] = values[candidate.id];
@@ -733,13 +813,16 @@ export async function renderGenerate(root, ctx) {
     });
 
     presetsCard.querySelector("[data-preset-save]")?.addEventListener("click", async (event) => {
-      const nameInput = presetsCard.querySelector("[data-preset-name]");
-      const name = nameInput.value.trim() || selectedPreset;
-      if (!name) return toast("Type a preset name first.", "warning");
-      const button = event.currentTarget;
+      const nameInput = presetsCard.querySelector<HTMLInputElement>("[data-preset-name]");
+      const name = nameInput?.value.trim() || selectedPreset;
+      if (!name || !config) {
+        toast("Type a preset name first.", "warning");
+        return;
+      }
+      const button = event.currentTarget as HTMLElement | null;
       setButtonBusy(button, true, "Saving…");
       try {
-        const updated = await api(`${workflowUrl(config.name)}/presets`, {
+        const updated = await api<WorkflowConfig>(`${workflowUrl(config.name)}/presets`, {
           method: "POST",
           body: { name, values: selectedValues(config, state.values) },
         });
@@ -747,28 +830,28 @@ export async function renderGenerate(root, ctx) {
         applyConfig(updated, { preserve: true });
         toast(`Saved preset “${name}”.`, "success");
       } catch (error) {
-        toast(error.message, "error");
+        toast(errorText(error), "error");
       } finally {
         setButtonBusy(button, false);
       }
     });
 
     presetsCard.querySelector("[data-preset-default]")?.addEventListener("click", async () => {
-      if (!selectedPreset) return;
+      if (!selectedPreset || !config) return;
       try {
-        const updated = await api(`${workflowUrl(config.name)}/presets/default`, {
+        const updated = await api<WorkflowConfig>(`${workflowUrl(config.name)}/presets/default`, {
           method: "POST",
           body: { name: selectedPreset },
         });
         applyConfig(updated, { preserve: true });
         toast(`“${selectedPreset}” will load automatically.`, "success");
       } catch (error) {
-        toast(error.message, "error");
+        toast(errorText(error), "error");
       }
     });
 
     presetsCard.querySelector("[data-preset-delete]")?.addEventListener("click", async () => {
-      if (!selectedPreset) return;
+      if (!selectedPreset || !config) return;
       const okay = await confirmDialog(`Delete the preset “${selectedPreset}”?`, {
         title: "Delete preset",
         confirmLabel: "Delete",
@@ -776,7 +859,7 @@ export async function renderGenerate(root, ctx) {
       });
       if (!okay) return;
       try {
-        const updated = await api(`${workflowUrl(config.name)}/presets/delete`, {
+        const updated = await api<WorkflowConfig>(`${workflowUrl(config.name)}/presets/delete`, {
           method: "POST",
           body: { name: selectedPreset },
         });
@@ -784,7 +867,7 @@ export async function renderGenerate(root, ctx) {
         applyConfig(updated, { preserve: true });
         toast("Preset deleted.", "success");
       } catch (error) {
-        toast(error.message, "error");
+        toast(errorText(error), "error");
       }
     });
   }
@@ -793,11 +876,12 @@ export async function renderGenerate(root, ctx) {
   /* Media inputs                                                     */
   /* ---------------------------------------------------------------- */
 
-  function renderMedia() {
+  function renderMedia(): void {
     if (!config) return;
-    const hasImages = (config.image_nodes || []).length > 0;
-    const hasAudio = (config.audio_nodes || []).length > 0;
-    const hasVideo = (config.video_nodes || []).length > 0;
+    const cfg = config;
+    const hasImages = cfg.image_nodes.length > 0;
+    const hasAudio = cfg.audio_nodes.length > 0;
+    const hasVideo = cfg.video_nodes.length > 0;
     if (!hasImages && !hasAudio && !hasVideo) {
       inputsCard.classList.add("hidden");
       inputsCard.innerHTML = "";
@@ -805,7 +889,7 @@ export async function renderGenerate(root, ctx) {
     }
     inputsCard.classList.remove("hidden");
 
-    const sections = [];
+    const sections: string[] = [];
     if (hasImages) {
       sections.push(`
         <div class="space-y-3">
@@ -814,7 +898,7 @@ export async function renderGenerate(root, ctx) {
             <span class="text-[11px] text-slate-600">Upload, crop, sketch or pick from the gallery</span>
           </div>
           <div class="grid gap-3 sm:grid-cols-2">
-            ${config.image_nodes.map((node, index) => imageSlotHtml(node, index)).join("")}
+            ${cfg.image_nodes.map((node, index) => imageSlotHtml(node, index)).join("")}
           </div>
         </div>
       `);
@@ -824,7 +908,7 @@ export async function renderGenerate(root, ctx) {
         <div class="space-y-3">
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Reference audio</h3>
-            <span class="text-[11px] text-slate-600">${escapeHtml(config.audio_nodes[0].label)}</span>
+            <span class="text-[11px] text-slate-600">${escapeHtml(cfg.audio_nodes[0]?.label)}</span>
           </div>
           ${audioSlotHtml()}
         </div>
@@ -835,7 +919,7 @@ export async function renderGenerate(root, ctx) {
         <div class="space-y-3">
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Input video</h3>
-            <span class="text-[11px] text-slate-600">${escapeHtml(config.video_nodes[0].label)}</span>
+            <span class="text-[11px] text-slate-600">${escapeHtml(cfg.video_nodes[0]?.label)}</span>
           </div>
           ${videoSlotHtml()}
         </div>
@@ -855,12 +939,12 @@ export async function renderGenerate(root, ctx) {
       <div class="space-y-5 p-4 sm:p-5">${sections.join("")}</div>
     `;
 
-    config.image_nodes.forEach((_node, index) => {
-      const slot = inputsCard.querySelector(`[data-image-slot="${index}"]`);
+    cfg.image_nodes.forEach((_node, index) => {
+      const slot = inputsCard.querySelector<HTMLElement>(`[data-image-slot="${index}"]`);
       if (!slot) return;
-      slot.querySelector("[data-image-upload]")?.addEventListener("change", (event) => {
-        const file = event.target.files?.[0];
-        if (file) uploadImageRef(file, index);
+      slot.querySelector<HTMLInputElement>("[data-image-upload]")?.addEventListener("change", (event) => {
+        const file = (event.target as HTMLInputElement).files?.[0];
+        if (file) void uploadImageRef(file, index);
       });
       slot.querySelector("[data-image-sketch]")?.addEventListener("click", () => openSketch(index));
       slot.querySelector("[data-image-crop]")?.addEventListener("click", () => openCrop(index));
@@ -871,9 +955,10 @@ export async function renderGenerate(root, ctx) {
       });
     });
 
-    inputsCard.querySelector("[data-audio-upload]")?.addEventListener("change", (event) => {
-      const file = event.target.files?.[0];
-      event.target.value = "";
+    inputsCard.querySelector<HTMLInputElement>("[data-audio-upload]")?.addEventListener("change", (event) => {
+      const input = event.target as HTMLInputElement;
+      const file = input.files?.[0];
+      input.value = "";
       if (file) openAudioUpload(file);
     });
     inputsCard.querySelector("[data-audio-trim]")?.addEventListener("click", openAudioTrim);
@@ -882,9 +967,13 @@ export async function renderGenerate(root, ctx) {
       state.audio = null;
       renderMedia();
     });
-    inputsCard.querySelector("[data-video-upload]")?.addEventListener("change", (event) => {
-      const file = event.target.files?.[0];
-      if (file) uploadMediaRef(file, (ref) => (state.video = ref), "Video");
+    inputsCard.querySelector<HTMLInputElement>("[data-video-upload]")?.addEventListener("change", (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (file) {
+        void uploadMediaRef(file, (ref) => {
+          state.video = ref;
+        }, "Video");
+      }
     });
     inputsCard.querySelector("[data-video-gallery]")?.addEventListener("click", openVideoGallery);
     inputsCard.querySelector("[data-video-clear]")?.addEventListener("click", () => {
@@ -893,7 +982,7 @@ export async function renderGenerate(root, ctx) {
     });
   }
 
-  function imageSlotHtml(node, index) {
+  function imageSlotHtml(node: WorkflowNodeRef, index: number): string {
     const ref = state.images[index];
     const preview = ref
       ? `<img src="${escapeHtml(ref.previewUrl)}" alt="${escapeHtml(node.label)}" class="h-full w-full object-contain" />`
@@ -965,7 +1054,7 @@ export async function renderGenerate(root, ctx) {
     `;
   }
 
-  async function uploadImageRef(file, index) {
+  async function uploadImageRef(file: File, index: number): Promise<void> {
     try {
       toast("Uploading image…", "info", 1500);
       const stored = await uploadFile(file);
@@ -977,11 +1066,15 @@ export async function renderGenerate(root, ctx) {
       renderMedia();
       toast("Image ready.", "success", 1600);
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     }
   }
 
-  async function uploadMediaRef(file, setter, label) {
+  async function uploadMediaRef(
+    file: File,
+    setter: (ref: MediaRef) => void,
+    label: string,
+  ): Promise<void> {
     try {
       toast(`Uploading ${label.toLowerCase()}…`, "info", 1500);
       const stored = await uploadFile(file);
@@ -989,12 +1082,12 @@ export async function renderGenerate(root, ctx) {
       renderMedia();
       toast(`${label} ready.`, "success", 1600);
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     }
   }
 
-  function openAudioUpload(file) {
-    openAudioTrimmer({
+  function openAudioUpload(file: File): void {
+    void openAudioTrimmer({
       source: file,
       name: file.name || "audio",
       title: "Trim reference audio",
@@ -1004,13 +1097,13 @@ export async function renderGenerate(root, ctx) {
     });
   }
 
-  function openAudioTrim() {
+  function openAudioTrim(): void {
     const ref = state.audio;
     if (!ref?.previewUrl) {
       toast("Choose an audio file first.", "warning");
       return;
     }
-    openAudioTrimmer({
+    void openAudioTrimmer({
       source: ref.previewUrl,
       name: ref.name || "audio",
       title: "Trim reference audio",
@@ -1019,7 +1112,7 @@ export async function renderGenerate(root, ctx) {
     });
   }
 
-  async function uploadAudioRef(file) {
+  async function uploadAudioRef(file: File): Promise<void> {
     const stored = await uploadFile(file);
     state.audio = {
       upload: stored.id,
@@ -1030,7 +1123,7 @@ export async function renderGenerate(root, ctx) {
     toast("Audio ready.", "success", 1600);
   }
 
-  async function openImageGallery(index) {
+  async function openImageGallery(index: number): Promise<void> {
     const modal = openModal({
       title: "Choose an image",
       subtitle: "Reuse a recent image from ComfyUI or the media folder.",
@@ -1040,7 +1133,7 @@ export async function renderGenerate(root, ctx) {
         .join("")}</div>`,
     });
     try {
-      const data = await api("/api/gallery/images?limit=60");
+      const data = await api<GalleryResponse>("/api/gallery/images?limit=60");
       if (!data.items.length) {
         modal.body.innerHTML = emptyState(
           "No images yet",
@@ -1063,7 +1156,7 @@ export async function renderGenerate(root, ctx) {
           )
           .join("")}
       </div>`;
-      modal.body.querySelectorAll("[data-gallery-item]").forEach((button) => {
+      modal.body.querySelectorAll<HTMLButtonElement>("[data-gallery-item]").forEach((button) => {
         button.addEventListener("click", () => {
           const item = data.items[Number(button.dataset.galleryItem)];
           state.images[index] = {
@@ -1076,7 +1169,7 @@ export async function renderGenerate(root, ctx) {
           toast("Gallery image selected.", "success", 1600);
         });
       });
-      modal.body.querySelectorAll("img[data-full-src]").forEach((image) => {
+      modal.body.querySelectorAll<HTMLImageElement>("img[data-full-src]").forEach((image) => {
         image.addEventListener("error", () => {
           const fallback = image.dataset.fullSrc;
           if (fallback && image.getAttribute("src") !== fallback) {
@@ -1087,7 +1180,7 @@ export async function renderGenerate(root, ctx) {
         });
       });
     } catch (error) {
-      modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(error.message)}</p>`;
+      modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(errorText(error))}</p>`;
     }
   }
 
@@ -1101,7 +1194,7 @@ export async function renderGenerate(root, ctx) {
         .join("")}</div>`,
     });
     try {
-      const data = await api("/api/gallery/videos?limit=60");
+      const data = await api<GalleryResponse>("/api/gallery/videos?limit=60");
       if (!data.items.length) {
         modal.body.innerHTML = emptyState(
           "No videos yet",
@@ -1134,7 +1227,7 @@ export async function renderGenerate(root, ctx) {
           )
           .join("")}
       </div>`;
-      modal.body.querySelectorAll("[data-video-item]").forEach((button) => {
+      modal.body.querySelectorAll<HTMLButtonElement>("[data-video-item]").forEach((button) => {
         button.addEventListener("click", () => {
           const item = data.items[Number(button.dataset.videoItem)];
           state.video = {
@@ -1147,11 +1240,11 @@ export async function renderGenerate(root, ctx) {
           toast("Gallery video selected.", "success", 1600);
         });
       });
-      modal.body.querySelectorAll("img[data-thumbnail]").forEach((image) => {
+      modal.body.querySelectorAll<HTMLImageElement>("img[data-thumbnail]").forEach((image) => {
         image.addEventListener("error", () => image.remove());
       });
     } catch (error) {
-      modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(error.message)}</p>`;
+      modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(errorText(error))}</p>`;
     }
   }
 
@@ -1165,7 +1258,7 @@ export async function renderGenerate(root, ctx) {
         .join("")}</div>`,
     });
     try {
-      const data = await api("/api/gallery/audio?limit=60");
+      const data = await api<GalleryResponse>("/api/gallery/audio?limit=60");
       if (!data.items.length) {
         modal.body.innerHTML = emptyState(
           "No audio yet",
@@ -1193,7 +1286,7 @@ export async function renderGenerate(root, ctx) {
           )
           .join("")}
       </div>`;
-      modal.body.querySelectorAll("[data-audio-item]").forEach((button) => {
+      modal.body.querySelectorAll<HTMLButtonElement>("[data-audio-item]").forEach((button) => {
         button.addEventListener("click", () => {
           const item = data.items[Number(button.dataset.audioItem)];
           state.audio = {
@@ -1207,11 +1300,11 @@ export async function renderGenerate(root, ctx) {
         });
       });
     } catch (error) {
-      modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(error.message)}</p>`;
+      modal.body.innerHTML = `<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${escapeHtml(errorText(error))}</p>`;
     }
   }
 
-  function openSketch(index) {
+  function openSketch(index: number): void {
     const ref = state.images[index];
     const modal = openModal({
       title: "Sketch an input image",
@@ -1244,24 +1337,25 @@ export async function renderGenerate(root, ctx) {
       `,
     });
 
-    const canvas = modal.element.querySelector("[data-sketch-canvas]");
+    const canvas = queryElement<HTMLCanvasElement>(modal.element, "[data-sketch-canvas]");
     const context = canvas.getContext("2d");
-    const colorInput = modal.element.querySelector("[data-brush-color]");
-    const sizeInput = modal.element.querySelector("[data-brush-size]");
-    const sizeLabel = modal.element.querySelector("[data-brush-label]");
+    if (!context) throw new Error("Canvas 2D is not available.");
+    const colorInput = queryElement<HTMLInputElement>(modal.element, "[data-brush-color]");
+    const sizeInput = queryElement<HTMLInputElement>(modal.element, "[data-brush-size]");
+    const sizeLabel = queryElement<HTMLElement>(modal.element, "[data-brush-label]");
     let drawing = false;
-    let last = null;
+    let last: { x: number; y: number } | null = null;
     let brushColor = colorInput.value;
     let brushSize = Number(sizeInput.value);
 
-    const resetCanvas = (width = 1024, height = 1024) => {
+    const resetCanvas = (width = 1024, height = 1024): void => {
       canvas.width = width;
       canvas.height = height;
       context.fillStyle = "#ffffff";
       context.fillRect(0, 0, width, height);
     };
 
-    const applyBrush = () => {
+    const applyBrush = (): void => {
       context.strokeStyle = brushColor;
       context.lineWidth = brushSize;
       context.lineCap = "round";
@@ -1289,7 +1383,7 @@ export async function renderGenerate(root, ctx) {
       applyBrush();
     }
 
-    const point = (event) => {
+    const point = (event: PointerEvent): { x: number; y: number } => {
       const rect = canvas.getBoundingClientRect();
       return {
         x: ((event.clientX - rect.left) / rect.width) * canvas.width,
@@ -1308,7 +1402,7 @@ export async function renderGenerate(root, ctx) {
       context.fill();
     });
     canvas.addEventListener("pointermove", (event) => {
-      if (!drawing) return;
+      if (!drawing || !last) return;
       const next = point(event);
       applyBrush();
       context.beginPath();
@@ -1317,7 +1411,7 @@ export async function renderGenerate(root, ctx) {
       context.stroke();
       last = next;
     });
-    const stopDrawing = () => {
+    const stopDrawing = (): void => {
       drawing = false;
       last = null;
     };
@@ -1338,12 +1432,13 @@ export async function renderGenerate(root, ctx) {
     });
     modal.element.querySelector("[data-sketch-cancel]")?.addEventListener("click", () => modal.close());
     modal.element.querySelector("[data-sketch-apply]")?.addEventListener("click", (event) => {
-      const button = event.currentTarget;
+      const button = event.currentTarget as HTMLElement | null;
       setButtonBusy(button, true, "Uploading…");
       canvas.toBlob(async (blob) => {
         if (!blob) {
           setButtonBusy(button, false);
-          return toast("Could not export the sketch.", "error");
+          toast("Could not export the sketch.", "error");
+          return;
         }
         try {
           const file = new File([blob], "sketch.png", { type: "image/png" });
@@ -1357,21 +1452,21 @@ export async function renderGenerate(root, ctx) {
           renderMedia();
           toast("Sketch applied.", "success");
         } catch (error) {
-          toast(error.message, "error");
+          toast(errorText(error), "error");
           setButtonBusy(button, false);
         }
       }, "image/png");
     });
   }
 
-  function openCrop(index) {
+  function openCrop(index: number): void {
     const ref = state.images[index];
     if (!ref?.previewUrl) {
       toast("Choose an image first.", "warning");
       return;
     }
 
-    let onResize = null;
+    let onResize: (() => void) | null = null;
     const modal = openModal({
       title: "Crop an input image",
       subtitle:
@@ -1419,33 +1514,46 @@ export async function renderGenerate(root, ctx) {
       `,
     });
 
-    const img = modal.element.querySelector("[data-crop-image]");
-    const box = modal.element.querySelector("[data-crop-box]");
-    const sizeLabel = modal.element.querySelector("[data-crop-size]");
-    const applyButton = modal.element.querySelector("[data-crop-apply]");
+    const img = queryElement<HTMLImageElement>(modal.element, "[data-crop-image]");
+    const box = queryElement<HTMLElement>(modal.element, "[data-crop-box]");
+    const sizeLabel = queryElement<HTMLElement>(modal.element, "[data-crop-size]");
+    const applyButton = queryElement<HTMLButtonElement>(modal.element, "[data-crop-apply]");
     const shades = {
-      n: modal.element.querySelector('[data-shade="n"]'),
-      s: modal.element.querySelector('[data-shade="s"]'),
-      w: modal.element.querySelector('[data-shade="w"]'),
-      e: modal.element.querySelector('[data-shade="e"]'),
+      n: queryElement<HTMLElement>(modal.element, '[data-shade="n"]'),
+      s: queryElement<HTMLElement>(modal.element, '[data-shade="s"]'),
+      w: queryElement<HTMLElement>(modal.element, '[data-shade="w"]'),
+      e: queryElement<HTMLElement>(modal.element, '[data-shade="e"]'),
     };
 
     // The selection is stored as fractions of the image so it survives a
     // viewport resize; the crop itself is computed from the natural pixels.
-    let selection = null;
-    let drag = null;
+    interface Selection {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }
+    interface DragState {
+      mode: string;
+      pointerId: number;
+      startX: number;
+      startY: number;
+      selection: Selection;
+    }
+    let selection: Selection | null = null;
+    let drag: DragState | null = null;
 
-    const displaySize = () => {
+    const displaySize = (): { width: number; height: number } => {
       const rect = img.getBoundingClientRect();
       return { width: rect.width, height: rect.height };
     };
 
-    const minSize = (dw, dh) => ({
+    const minSize = (dw: number, dh: number): { width: number; height: number } => ({
       width: Math.min(0.5, 24 / Math.max(1, dw)),
       height: Math.min(0.5, 24 / Math.max(1, dh)),
     });
 
-    function naturalRect() {
+    function naturalRect(): { x: number; y: number; width: number; height: number } | null {
       if (!selection || !img.naturalWidth || !img.naturalHeight) return null;
       const nw = img.naturalWidth;
       const nh = img.naturalHeight;
@@ -1456,7 +1564,7 @@ export async function renderGenerate(root, ctx) {
       return { x, y, width, height };
     }
 
-    function render() {
+    function render(): void {
       if (!selection) return;
       const left = selection.x * 100;
       const top = selection.y * 100;
@@ -1497,7 +1605,7 @@ export async function renderGenerate(root, ctx) {
       if (rect && sizeLabel) sizeLabel.textContent = `${rect.width} × ${rect.height}`;
     }
 
-    function initialize() {
+    function initialize(): void {
       const { width: dw, height: dh } = displaySize();
       if (!dw || !dh) return;
       const side = Math.min(dw, dh) * 0.8;
@@ -1510,7 +1618,7 @@ export async function renderGenerate(root, ctx) {
       render();
     }
 
-    function selectionFrom(mode, start, dx, dy) {
+    function selectionFrom(mode: string, start: Selection, dx: number, dy: number): Selection {
       const { width: dw, height: dh } = displaySize();
       if (!dw || !dh) return start;
       const minimum = minSize(dw, dh);
@@ -1540,14 +1648,14 @@ export async function renderGenerate(root, ctx) {
       return next;
     }
 
-    box.querySelectorAll("[data-handle]").forEach((handle) => {
+    box.querySelectorAll<HTMLElement>("[data-handle]").forEach((handle) => {
       handle.addEventListener("pointerdown", (event) => {
         if (!selection) return;
         event.preventDefault();
         event.stopPropagation();
         handle.setPointerCapture(event.pointerId);
         drag = {
-          mode: handle.dataset.handle,
+          mode: handle.dataset.handle || "",
           pointerId: event.pointerId,
           startX: event.clientX,
           startY: event.clientY,
@@ -1564,7 +1672,7 @@ export async function renderGenerate(root, ctx) {
         );
         render();
       });
-      const finish = (event) => {
+      const finish = (event: PointerEvent): void => {
         if (!drag || drag.pointerId !== event.pointerId) return;
         drag = null;
       };
@@ -1575,12 +1683,14 @@ export async function renderGenerate(root, ctx) {
     onResize = () => render();
     window.addEventListener("resize", onResize);
 
-    const start = () => requestAnimationFrame(initialize);
+    const start = (): void => {
+      requestAnimationFrame(initialize);
+    };
     if (img.complete && img.naturalWidth > 0) start();
     else img.addEventListener("load", start, { once: true });
     img.addEventListener("error", () => {
-      if (sizeLabel) sizeLabel.textContent = "Image unavailable";
-      if (applyButton) applyButton.disabled = true;
+      sizeLabel.textContent = "Image unavailable";
+      applyButton.disabled = true;
     });
 
     modal.element
@@ -1602,6 +1712,11 @@ export async function renderGenerate(root, ctx) {
       canvas.width = rect.width;
       canvas.height = rect.height;
       const context = canvas.getContext("2d");
+      if (!context) {
+        setButtonBusy(applyButton, false);
+        toast("Could not crop the image.", "error");
+        return;
+      }
       context.drawImage(
         img,
         rect.x,
@@ -1633,7 +1748,7 @@ export async function renderGenerate(root, ctx) {
             renderMedia();
             toast("Crop applied.", "success");
           } catch (error) {
-            toast(error.message, "error");
+            toast(errorText(error), "error");
             setButtonBusy(applyButton, false);
           }
         },
@@ -1647,10 +1762,10 @@ export async function renderGenerate(root, ctx) {
   /* Dynamic controls                                                 */
   /* ---------------------------------------------------------------- */
 
-  function controlHtml(candidate, value) {
+  function controlHtml(candidate: NodeCandidate, value: unknown): string {
     const field = candidate.field_def || {};
     const widget = field.widget || "textbox";
-    const options = field.options || {};
+    const options = (field.options || {}) as Record<string, unknown>;
     const id = escapeHtml(candidate.id);
     const label = escapeHtml(candidate.display_name || candidate.title || candidate.class_type);
     const meta = `<span class="font-mono text-[10px] text-slate-600">${escapeHtml(candidate.node)} · ${escapeHtml(candidate.input)}</span>`;
@@ -1682,7 +1797,7 @@ export async function renderGenerate(root, ctx) {
     }
 
     if (widget === "dropdown") {
-      const choices = Array.isArray(field.choices) ? [...field.choices] : [];
+      const choices: unknown[] = Array.isArray(field.choices) ? [...field.choices] : [];
       if (value !== undefined && value !== null && !choices.includes(value)) choices.unshift(value);
       return `
         <div class="field-row" data-control="${id}">
@@ -1719,18 +1834,19 @@ export async function renderGenerate(root, ctx) {
     `;
   }
 
-  function renderControls() {
+  function renderControls(): void {
     if (!config) return;
+    const cfg = config;
     const candidatesById = new Map(
-      config.candidates.map((candidate) => [candidate.id, candidate]),
+      cfg.candidates.map((candidate) => [candidate.id, candidate]),
     );
     // Follow the saved binding order, not the workflow's node order.
-    const candidates = (config.selected || [])
+    const candidates = cfg.selected
       .map((bindingId) => candidatesById.get(bindingId))
-      .filter(Boolean);
+      .filter((candidate): candidate is NodeCandidate => Boolean(candidate));
     // The seed control may be hidden, so look at every candidate rather than
     // only the selected ones.
-    const hasSeed = config.candidates.some((candidate) =>
+    const hasSeed = cfg.candidates.some((candidate) =>
       /(^|_)(noise_)?seed$/.test(candidate.input),
     );
     const randomizeRow = hasSeed
@@ -1739,9 +1855,9 @@ export async function renderGenerate(root, ctx) {
            <span class="switch"><input type="checkbox" ${randomize ? "checked" : ""} data-randomize /><span></span></span>
          </label>`
       : "";
-    const bindRandomize = () => {
+    const bindRandomize = (): void => {
       controls.querySelector("[data-randomize]")?.addEventListener("change", (event) => {
-        randomize = event.target.checked;
+        randomize = (event.target as HTMLInputElement).checked;
       });
     };
 
@@ -1774,10 +1890,11 @@ export async function renderGenerate(root, ctx) {
       ${randomizeRow ? `<div class="mt-4">${randomizeRow}</div>` : ""}
     `;
 
-    controls.querySelectorAll("[data-binding]").forEach((input) => {
+    controls.querySelectorAll<HTMLInputElement>("[data-binding]").forEach((input) => {
       const id = input.dataset.binding;
-      const widget = config.candidates.find((candidate) => candidate.id === id)?.field_def?.widget;
-      const read = () => {
+      if (!id) return;
+      const widget = cfg.candidates.find((candidate) => candidate.id === id)?.field_def?.widget;
+      const read = (): unknown => {
         if (input.type === "checkbox") return input.checked;
         if (input.type === "number" || input.type === "range") {
           const number = Number(input.value);
@@ -1785,22 +1902,22 @@ export async function renderGenerate(root, ctx) {
         }
         return input.value;
       };
-      const update = () => {
+      const update = (): void => {
         state.values[id] = read();
         if (input.dataset.range !== undefined) {
-          const numberInput = input.closest("[data-control]")?.querySelector("[data-range-number]");
+          const numberInput = input.closest("[data-control]")?.querySelector<HTMLInputElement>("[data-range-number]");
           if (numberInput) numberInput.value = input.value;
         }
       };
       input.addEventListener("input", update);
       input.addEventListener("change", update);
       if (widget === "slider" && input.dataset.range !== undefined) {
-        const numberInput = input.closest("[data-control]")?.querySelector("[data-range-number]");
+        const numberInput = input.closest("[data-control]")?.querySelector<HTMLInputElement>("[data-range-number]");
         numberInput?.addEventListener("input", () => {
           const minimum = Number(input.min);
           const maximum = Number(input.max);
           const value = Math.min(maximum, Math.max(minimum, Number(numberInput.value) || minimum));
-          input.value = value;
+          input.value = String(value);
           state.values[id] = value;
         });
       }
@@ -1813,14 +1930,15 @@ export async function renderGenerate(root, ctx) {
   /* Input picker + notes editor                                      */
   /* ---------------------------------------------------------------- */
 
-  function openInputPicker() {
+  function openInputPicker(): void {
     if (!config) return;
-    const rows = config.candidates.map((candidate) => {
-      const position = config.selected.indexOf(candidate.id);
+    const cfg = config;
+    const rows = cfg.candidates.map((candidate) => {
+      const position = cfg.selected.indexOf(candidate.id);
       return {
         candidate,
         show: position >= 0,
-        order: position >= 0 ? position + 1 : "",
+        order: (position >= 0 ? String(position + 1) : "") as string,
         name: candidate.display_name || "",
       };
     });
@@ -1832,7 +1950,7 @@ export async function renderGenerate(root, ctx) {
 
     const modal = openModal({
       title: "Choose inputs",
-      subtitle: `Pick which node inputs are shown for ${config.name}. Drag-free ordering is set with the Order column.`,
+      subtitle: `Pick which node inputs are shown for ${cfg.name}. Drag-free ordering is set with the Order column.`,
       size: "lg",
       content: `
         <div class="space-y-5">
@@ -1880,12 +1998,13 @@ export async function renderGenerate(root, ctx) {
       `,
     });
 
-    const rowNodes = [...modal.body.querySelectorAll("[data-picker-row]")];
-    const updateRowState = (index) => {
+    const rowNodes = [...modal.body.querySelectorAll<HTMLElement>("[data-picker-row]")];
+    const updateRowState = (index: number): void => {
       const row = rows[index];
       const node = rowNodes[index];
-      const checkbox = node.querySelector("[data-show]");
-      const order = node.querySelector("[data-order]");
+      if (!row || !node) return;
+      const checkbox = queryElement<HTMLInputElement>(node, "[data-show]");
+      const order = queryElement<HTMLInputElement>(node, "[data-order]");
       row.show = checkbox.checked;
       if (row.show) {
         if (!order.value) {
@@ -1900,11 +2019,13 @@ export async function renderGenerate(root, ctx) {
 
     rowNodes.forEach((node, index) => {
       node.querySelector("[data-show]")?.addEventListener("change", () => updateRowState(index));
-      node.querySelector("[data-order]")?.addEventListener("input", () => {
-        rows[index].order = node.querySelector("[data-order]").value;
+      node.querySelector<HTMLInputElement>("[data-order]")?.addEventListener("input", (event) => {
+        const row = rows[index];
+        if (row) row.order = (event.target as HTMLInputElement).value;
       });
-      node.querySelector("[data-name]")?.addEventListener("input", () => {
-        rows[index].name = node.querySelector("[data-name]").value;
+      node.querySelector<HTMLInputElement>("[data-name]")?.addEventListener("input", (event) => {
+        const row = rows[index];
+        if (row) row.name = (event.target as HTMLInputElement).value;
       });
     });
 
@@ -1912,7 +2033,8 @@ export async function renderGenerate(root, ctx) {
       rows.forEach((row, index) => {
         if (!row.show) {
           const node = rowNodes[index];
-          node.querySelector("[data-show]").checked = true;
+          if (!node) return;
+          queryElement<HTMLInputElement>(node, "[data-show]").checked = true;
           updateRowState(index);
         }
       });
@@ -1920,13 +2042,14 @@ export async function renderGenerate(root, ctx) {
     modal.body.querySelector("[data-select-none]")?.addEventListener("click", () => {
       rows.forEach((row, index) => {
         const node = rowNodes[index];
-        node.querySelector("[data-show]").checked = false;
+        if (!node) return;
+        queryElement<HTMLInputElement>(node, "[data-show]").checked = false;
         updateRowState(index);
       });
     });
     modal.element.querySelector("[data-picker-close]")?.addEventListener("click", () => modal.close());
     modal.element.querySelector("[data-picker-save]")?.addEventListener("click", async (event) => {
-      const button = event.currentTarget;
+      const button = event.currentTarget as HTMLElement | null;
       setButtonBusy(button, true, "Saving…");
       const ordered = rows
         .filter((row) => row.show)
@@ -1936,7 +2059,7 @@ export async function renderGenerate(root, ctx) {
           return first - second;
         });
       try {
-        const updated = await api(`${workflowUrl(config.name)}/fields`, {
+        const updated = await api<WorkflowConfig>(`${workflowUrl(cfg.name)}/fields`, {
           method: "PUT",
           body: {
             bindings: [
@@ -1961,20 +2084,21 @@ export async function renderGenerate(root, ctx) {
         applyConfig(updated, { preserve: true });
         toast("Input selection saved.", "success");
       } catch (error) {
-        toast(error.message, "error");
+        toast(errorText(error), "error");
         setButtonBusy(button, false);
       }
     });
   }
 
-  function openNotesEditor() {
+  function openNotesEditor(): void {
     if (!config) return;
+    const cfg = config;
     const modal = openModal({
       title: "Workflow notes",
-      subtitle: `Markdown tips shown on the Generate page for ${config.name}.`,
+      subtitle: `Markdown tips shown on the Generate page for ${cfg.name}.`,
       size: "lg",
       content: `
-        <textarea class="textarea font-mono text-xs" rows="14" data-notes placeholder="### Tips&#10;&#10;- Add workflow-specific tips here.">${escapeHtml(config.notes || "")}</textarea>
+        <textarea class="textarea font-mono text-xs" rows="14" data-notes placeholder="### Tips&#10;&#10;- Add workflow-specific tips here.">${escapeHtml(cfg.notes || "")}</textarea>
       `,
       footer: `
         <div class="flex w-full flex-wrap items-center justify-end gap-2">
@@ -1986,20 +2110,20 @@ export async function renderGenerate(root, ctx) {
 
     modal.element.querySelector("[data-notes-cancel]")?.addEventListener("click", () => modal.close());
     modal.element.querySelector("[data-notes-save]")?.addEventListener("click", async (event) => {
-      const button = event.currentTarget;
-      const notes = modal.body.querySelector("[data-notes]").value;
+      const button = event.currentTarget as HTMLElement | null;
+      const notes = queryElement<HTMLTextAreaElement>(modal.body, "[data-notes]").value;
       setButtonBusy(button, true, "Saving…");
       try {
-        const response = await api(`${workflowUrl(config.name)}/notes`, {
+        const response = await api<{ notes: string | null }>(`${workflowUrl(cfg.name)}/notes`, {
           method: "PUT",
           body: { notes },
         });
-        config.notes = response.notes;
+        cfg.notes = response.notes;
         renderNotes();
         modal.close();
         toast("Notes saved.", "success");
       } catch (error) {
-        toast(error.message, "error");
+        toast(errorText(error), "error");
         setButtonBusy(button, false);
       }
     });
@@ -2009,7 +2133,10 @@ export async function renderGenerate(root, ctx) {
   /* Config lifecycle and generation                                  */
   /* ---------------------------------------------------------------- */
 
-  function applyConfig(nextConfig, { preserve = false } = {}) {
+  function applyConfig(
+    nextConfig: WorkflowConfig,
+    { preserve = false }: { preserve?: boolean } = {},
+  ): void {
     const previousValues = state.values;
     config = nextConfig;
     workflow = nextConfig.name;
@@ -2050,28 +2177,31 @@ export async function renderGenerate(root, ctx) {
     stopButton.disabled = !state.running;
   }
 
-  async function loadWorkflow(name, { preserve = false } = {}) {
+  async function loadWorkflow(
+    name: string | null,
+    { preserve = false }: { preserve?: boolean } = {},
+  ): Promise<void> {
     if (!name) {
       $("[data-workflow-summary]").textContent = "No workflow selected";
       return;
     }
     try {
       $("[data-workflow-summary]").textContent = "Loading…";
-      const data = await api(workflowUrl(name));
+      const data = await api<WorkflowConfig>(workflowUrl(name));
       applyConfig(data, { preserve });
       if (!preserve) {
         selectedPreset = data.default_preset || data.preset_names[0] || "";
       }
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
       $("[data-workflow-summary]").textContent = "Could not load workflow";
     }
   }
 
-  async function runGenerate() {
+  async function runGenerate(): Promise<void> {
     if (!config || job.running) return;
 
-    const payload = {
+    const payload: { workflow: string } & Record<string, unknown> = {
       workflow: config.name,
       values: candidateValues(config, state.values),
       randomize_seed: randomize,
@@ -2083,10 +2213,10 @@ export async function renderGenerate(root, ctx) {
     await startGeneration(payload);
   }
 
-  async function stopGenerate() {
+  async function stopGenerate(): Promise<void> {
     if (!job.running) return;
     job.progress = {
-      value: job.progress?.value,
+      value: job.progress?.value ?? 0,
       message: "Cancelling…",
       indeterminate: true,
     };
@@ -2096,7 +2226,7 @@ export async function renderGenerate(root, ctx) {
       toast("Stopping generation…", "warning", 2200);
       schedulePoll(250);
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     }
   }
 
@@ -2106,15 +2236,19 @@ export async function renderGenerate(root, ctx) {
 
   workflowSelect?.addEventListener("change", () => {
     selectedPreset = null;
-    loadWorkflow(workflowSelect.value, { preserve: false });
+    void loadWorkflow(workflowSelect.value, { preserve: false });
   });
   $("[data-reload-workflow]")?.addEventListener("click", () => {
-    loadWorkflow(workflow, { preserve: true });
+    void loadWorkflow(workflow, { preserve: true });
     toast("Workflow refreshed.", "success", 1800);
   });
   $("[data-choose-inputs]")?.addEventListener("click", openInputPicker);
-  generateButton.addEventListener("click", runGenerate);
-  stopButton.addEventListener("click", stopGenerate);
+  generateButton.addEventListener("click", () => {
+    void runGenerate();
+  });
+  stopButton.addEventListener("click", () => {
+    void stopGenerate();
+  });
 
   renderButtons();
   renderResult();

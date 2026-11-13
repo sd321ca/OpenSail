@@ -1,32 +1,60 @@
 /** Small fetch wrapper for the OpenSail JSON/SSE API. */
 
+import type { UploadedFile } from "./types";
+
 export class ApiError extends Error {
-  constructor(message, status = 0) {
+  readonly status: number;
+
+  constructor(message: string, status = 0) {
     super(message);
     this.name = "ApiError";
     this.status = status;
   }
 }
 
-async function errorMessage(response) {
+/** Human-readable message for a thrown value (``catch (error)`` is unknown). */
+export function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error ?? "Unknown error");
+}
+
+async function errorMessage(response: Response): Promise<string> {
   try {
-    const data = await response.json();
-    if (data && typeof data.detail === "string") return data.detail;
-    if (data && data.detail) return JSON.stringify(data.detail);
-  } catch (_error) {
+    const data: unknown = await response.json();
+    if (data && typeof data === "object" && "detail" in data) {
+      const detail = (data as { detail: unknown }).detail;
+      if (typeof detail === "string") return detail;
+      if (detail) return JSON.stringify(detail);
+    }
+  } catch {
     // Fall through to the status text.
   }
   return response.statusText || `Request failed (${response.status})`;
 }
 
-export async function api(path, options = {}) {
+export interface ApiOptions {
+  method?: string;
+  body?: unknown;
+  signal?: AbortSignal;
+  headers?: Record<string, string>;
+}
+
+/**
+ * Call a JSON endpoint. ``T`` defaults to ``any`` because most handlers still
+ * return untyped dicts; pass an explicit type where the payload matters.
+ */
+export async function api<T = any>(
+  path: string,
+  options: ApiOptions = {},
+): Promise<T> {
   const { method = "GET", body, signal, headers = {} } = options;
-  const init = { method, signal, headers: { ...headers } };
+  const init: RequestInit = { method, signal, headers: { ...headers } };
   if (body !== undefined) {
     if (body instanceof FormData) {
       init.body = body;
     } else {
-      init.headers["Content-Type"] = "application/json";
+      (init.headers as Record<string, string>)["Content-Type"] =
+        "application/json";
       init.body = JSON.stringify(body);
     }
   }
@@ -34,27 +62,32 @@ export async function api(path, options = {}) {
   if (!response.ok) {
     throw new ApiError(await errorMessage(response), response.status);
   }
-  if (response.status === 204) return null;
+  if (response.status === 204) return null as T;
   const type = response.headers.get("content-type") || "";
-  if (!type.includes("application/json")) return response.text();
-  return response.json();
+  if (!type.includes("application/json")) return (await response.text()) as T;
+  return (await response.json()) as T;
 }
 
-export async function uploadFile(file) {
+export async function uploadFile(file: File): Promise<UploadedFile> {
   const form = new FormData();
   form.append("file", file, file.name || "upload");
   const response = await fetch("/api/uploads", { method: "POST", body: form });
   if (!response.ok) {
     throw new ApiError(await errorMessage(response), response.status);
   }
-  return response.json();
+  return (await response.json()) as UploadedFile;
 }
 
 /**
  * POST a JSON body and consume a server-sent-event stream.
- * `onEvent(event)` is called for every parsed event object.
+ * ``onEvent(event)`` is called for every parsed event object.
  */
-export async function stream(path, body, onEvent, signal) {
+export async function stream<T = any>(
+  path: string,
+  body: unknown,
+  onEvent: (event: T) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
@@ -70,7 +103,7 @@ export async function stream(path, body, onEvent, signal) {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  const flush = (chunk) => {
+  const flush = (chunk: string): void => {
     for (const block of chunk.split(/\r?\n\r?\n/)) {
       if (!block.trim()) continue;
       const data = block
@@ -80,7 +113,7 @@ export async function stream(path, body, onEvent, signal) {
         .join("\n");
       if (!data) continue;
       try {
-        onEvent(JSON.parse(data));
+        onEvent(JSON.parse(data) as T);
       } catch (error) {
         console.error("Could not parse stream event", data, error);
       }

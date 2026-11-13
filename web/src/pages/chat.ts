@@ -1,38 +1,50 @@
-import { api, stream, uploadFile } from "../api.js";
+import { api, errorText, stream, uploadFile } from "../api";
 import {
   confirmDialog,
   escapeHtml,
   icon,
   openModal,
   plainText,
+  queryElement,
   renderMarkdown,
   setButtonBusy,
   spinner,
   toast,
-} from "../ui.js";
+} from "../ui";
+import type {
+  Bootstrap,
+  ChatPersonaSettings,
+  ChatPersonas,
+  RenderContext,
+  TtsModel,
+} from "../types";
 
 const STORAGE_KEY = "opensail.chat.settings.v1";
-const SpeechRecognition =
+const SpeechRecognitionCtor =
   typeof window !== "undefined"
     ? window.SpeechRecognition || window.webkitSpeechRecognition
     : null;
 const speechInputReady =
-  Boolean(SpeechRecognition) &&
+  Boolean(SpeechRecognitionCtor) &&
   typeof window !== "undefined" &&
   window.isSecureContext;
 
-let templatePromise = null;
+// Absolute so the layout keeps resolving once the modules are bundled into
+// /assets/app.js instead of living beside chat.html.
+const CHAT_TEMPLATE_URL = "/assets/pages/chat.html";
 
-function loadChatTemplate() {
+let templatePromise: Promise<string> | null = null;
+
+function loadChatTemplate(): Promise<string> {
   if (!templatePromise) {
-    templatePromise = fetch(new URL("./chat.html", import.meta.url))
+    templatePromise = fetch(CHAT_TEMPLATE_URL)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Could not load the chat layout (${response.status}).`);
         }
         return response.text();
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         templatePromise = null;
         throw error;
       });
@@ -40,11 +52,55 @@ function loadChatTemplate() {
   return templatePromise;
 }
 
-function loadSettings(boot) {
-  let saved = {};
+/** The subset of chat settings persisted in localStorage. */
+interface ChatSettings {
+  model: string;
+  systemPrompt: string;
+  thinking: boolean;
+  engine: string;
+  browserVoice: string;
+  ttsVoice: string;
+  persona: string;
+}
+
+/** An uploaded image attached to the next message. */
+interface PendingImage {
+  id: string;
+  url: string;
+  name: string;
+}
+
+/** One rendered turn in the conversation. */
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  images?: PendingImage[];
+  streaming?: boolean;
+  stopped?: boolean;
+}
+
+/** Events streamed by ``POST /api/chat/stream``. */
+interface ChatStreamEvent {
+  type?: string;
+  message?: string;
+  text?: string;
+  url?: string;
+  status?: string;
+  loaded?: boolean;
+}
+
+interface ChatStatusResponse {
+  status?: string;
+  loaded?: boolean;
+  personas?: ChatPersonas;
+  voices?: string[];
+}
+
+function loadSettings(boot: Bootstrap): ChatSettings {
+  let saved: Partial<ChatSettings> = {};
   try {
-    saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch (_error) {
+    saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Partial<ChatSettings>;
+  } catch {
     saved = {};
   }
   return {
@@ -58,26 +114,32 @@ function loadSettings(boot) {
   };
 }
 
-function saveSettings(settings) {
+function saveSettings(settings: ChatSettings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch (_error) {
+  } catch {
     // Storage can be unavailable in private windows; settings still work.
   }
 }
 
-export async function renderChat(root, ctx) {
-  const boot = ctx.boot;
+export async function renderChat(
+  root: HTMLElement,
+  ctx: RenderContext,
+): Promise<() => void> {
+  if (!ctx.boot) throw new Error("Chat page requires the bootstrap payload.");
+  const boot: Bootstrap = ctx.boot;
   const settings = loadSettings(boot);
-  const messages = [];
-  let pendingImages = [];
+  const messages: ChatMessage[] = [];
+  let pendingImages: PendingImage[] = [];
   let running = false;
-  let controller = null;
-  let ttsVoices = [];
+  let controller: AbortController | null = null;
+  let ttsVoices: string[] = [];
   let ttsVoicesModel = "";
-  let statusText = boot.chat_loaded ? boot.chat_status : "No model loaded. It loads on the first message.";
+  let statusText = boot.chat_loaded
+    ? boot.chat_status
+    : "No model loaded. It loads on the first message.";
   let phaseText = "";
-  let talkRecognition = null;
+  let talkRecognition: SpeechRecognitionLike | null = null;
   let talkState = "idle";
   let talkFinal = "";
   let talkInterim = "";
@@ -100,57 +162,58 @@ export async function renderChat(root, ctx) {
 
   // A server-side voice engine is any text-to-speech model from
   // audio_models.json; "off" and "browser" are handled by the browser.
-  function isServerEngine(engine) {
+  function isServerEngine(engine: string): boolean {
     return ttsModelIds.has(engine);
   }
 
-  function selectedTtsModel() {
+  function selectedTtsModel(): TtsModel | null {
     return ttsModels.find((model) => model.id === settings.engine) || null;
   }
 
   root.innerHTML = await loadChatTemplate();
-  root.querySelectorAll("[data-icon]").forEach((element) => {
+  root.querySelectorAll<HTMLElement>("[data-icon]").forEach((element) => {
     element.innerHTML = icon(
-      element.dataset.icon,
+      element.dataset.icon || "info",
       element.dataset.iconClass || "h-4 w-4",
     );
   });
 
-  const $ = (selector) => root.querySelector(selector);
-  const messagesEl = $("[data-messages]");
-  const input = $("[data-input]");
-  const form = $("[data-composer]");
-  const sendButton = $("[data-send]");
-  const stopButton = $("[data-stop]");
-  const modelSelect = $("[data-model]");
-  const attachLabel = $("[data-attach]");
-  const fileInput = $("[data-file]");
-  const talkButton = $("[data-talk]");
-  const talkLabel = $("[data-talk-label]");
-  const attachmentsEl = $("[data-attachments]");
-  const chatStatus = $("[data-chat-status]");
-  const phaseChip = $("[data-chat-phase]");
-  const modelChip = $("[data-model-chip]");
-  const spoken = $("[data-spoken]");
-  const spokenWrap = $("[data-spoken-wrap]");
-  const systemInput = $("[data-system]");
-  const thinkingInput = $("[data-thinking]");
-  const engineSelect = $("[data-engine]");
-  const browserVoiceSelect = $("[data-browser-voice]");
-  const browserVoiceWrap = $("[data-browser-voice-wrap]");
-  const ttsVoiceSelect = $("[data-tts-voice]");
-  const ttsVoiceWrap = $("[data-tts-voice-wrap]");
-  const personaSelect = $("[data-persona]");
-  const personaSaveButton = $("[data-persona-save]");
-  const personaDeleteButton = $("[data-persona-delete]");
+  const $ = <T extends Element>(selector: string): T =>
+    queryElement<T>(root, selector);
+  const messagesEl = $<HTMLElement>("[data-messages]");
+  const input = $<HTMLTextAreaElement>("[data-input]");
+  const form = $<HTMLFormElement>("[data-composer]");
+  const sendButton = $<HTMLButtonElement>("[data-send]");
+  const stopButton = $<HTMLButtonElement>("[data-stop]");
+  const modelSelect = $<HTMLSelectElement>("[data-model]");
+  const attachLabel = $<HTMLElement>("[data-attach]");
+  const fileInput = $<HTMLInputElement>("[data-file]");
+  const talkButton = $<HTMLButtonElement>("[data-talk]");
+  const talkLabel = $<HTMLElement>("[data-talk-label]");
+  const attachmentsEl = $<HTMLElement>("[data-attachments]");
+  const chatStatus = $<HTMLElement>("[data-chat-status]");
+  const phaseChip = $<HTMLElement>("[data-chat-phase]");
+  const modelChip = $<HTMLElement>("[data-model-chip]");
+  const spoken = $<HTMLAudioElement>("[data-spoken]");
+  const spokenWrap = $<HTMLElement>("[data-spoken-wrap]");
+  const systemInput = $<HTMLTextAreaElement>("[data-system]");
+  const thinkingInput = $<HTMLInputElement>("[data-thinking]");
+  const engineSelect = $<HTMLSelectElement>("[data-engine]");
+  const browserVoiceSelect = $<HTMLSelectElement>("[data-browser-voice]");
+  const browserVoiceWrap = $<HTMLElement>("[data-browser-voice-wrap]");
+  const ttsVoiceSelect = $<HTMLSelectElement>("[data-tts-voice]");
+  const ttsVoiceWrap = $<HTMLElement>("[data-tts-voice-wrap]");
+  const personaSelect = $<HTMLSelectElement>("[data-persona]");
+  const personaSaveButton = $<HTMLButtonElement>("[data-persona-save]");
+  const personaDeleteButton = $<HTMLButtonElement>("[data-persona-delete]");
 
-  let personas = boot.chat_personas || {};
+  let personas: ChatPersonas = boot.chat_personas || {};
   let selectedPersona = "";
   // Name offered by the Save dialog. It survives a manual edit (which switches
   // the dropdown to Custom) so the edited settings can update that persona.
   let personaDraft = "";
 
-  if (SpeechRecognition) {
+  if (SpeechRecognitionCtor) {
     talkButton.classList.remove("hidden");
     if (!speechInputReady) {
       talkButton.classList.add("cursor-not-allowed", "opacity-40");
@@ -184,7 +247,7 @@ export async function renderChat(root, ctx) {
   /* Messages                                                         */
   /* ---------------------------------------------------------------- */
 
-  function emptyChatHtml() {
+  function emptyChatHtml(): string {
     return `
       <div class="flex h-full min-h-[24rem] flex-col items-center justify-center gap-4 px-6 py-10 text-center">
         <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-accent-400/20 bg-accent-500/10 text-accent-300">${icon("chat", "h-7 w-7")}</div>
@@ -204,12 +267,12 @@ export async function renderChat(root, ctx) {
     `;
   }
 
-  function renderMessages() {
+  function renderMessages(): void {
     if (!messages.length) {
       messagesEl.innerHTML = emptyChatHtml();
-      messagesEl.querySelectorAll("[data-suggestion]").forEach((button) => {
+      messagesEl.querySelectorAll<HTMLElement>("[data-suggestion]").forEach((button) => {
         button.addEventListener("click", () => {
-          input.value = button.dataset.suggestion;
+          input.value = button.dataset.suggestion || "";
           input.focus();
         });
       });
@@ -252,20 +315,22 @@ export async function renderChat(root, ctx) {
     scrollToBottom(true);
   }
 
-  function updateStreamingMessage(message) {
+  function updateStreamingMessage(message: ChatMessage): void {
     const index = messages.indexOf(message);
-    const node = messagesEl.querySelector(`[data-message="${index}"] [data-bubble]`);
+    const node = messagesEl.querySelector<HTMLElement>(
+      `[data-message="${index}"] [data-bubble]`,
+    );
     if (!node) {
       renderMessages();
       return;
     }
     node.innerHTML = renderMarkdown(message.content) || `<span class="text-slate-500">${message.stopped ? "Stopped." : "Thinking…"}</span>`;
-    const cursor = node.parentElement.querySelector(".animate-pulse");
+    const cursor = node.parentElement?.querySelector(".animate-pulse");
     if (!message.streaming) cursor?.remove();
     scrollToBottom();
   }
 
-  function scrollToBottom(force = false) {
+  function scrollToBottom(force = false): void {
     const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
     if (force || distance < 180) {
       messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -276,7 +341,7 @@ export async function renderChat(root, ctx) {
   /* Attachments                                                      */
   /* ---------------------------------------------------------------- */
 
-  function renderAttachments() {
+  function renderAttachments(): void {
     attachmentsEl.classList.toggle("hidden", !pendingImages.length);
     attachmentsEl.innerHTML = pendingImages
       .map(
@@ -288,7 +353,7 @@ export async function renderChat(root, ctx) {
       `,
       )
       .join("");
-    attachmentsEl.querySelectorAll("[data-remove-attachment]").forEach((button) => {
+    attachmentsEl.querySelectorAll<HTMLElement>("[data-remove-attachment]").forEach((button) => {
       button.addEventListener("click", () => {
         pendingImages.splice(Number(button.dataset.removeAttachment), 1);
         renderAttachments();
@@ -296,7 +361,7 @@ export async function renderChat(root, ctx) {
     });
   }
 
-  function updateAttachAvailability() {
+  function updateAttachAvailability(): void {
     const model = chatModels.find((entry) => entry.path === modelSelect.value);
     const multimodal = Boolean(model?.multimodal);
     attachLabel.classList.toggle("cursor-pointer", multimodal);
@@ -314,15 +379,16 @@ export async function renderChat(root, ctx) {
   }
 
   fileInput.addEventListener("change", async (event) => {
-    const files = [...(event.target.files || [])];
-    event.target.value = "";
+    const target = event.target as HTMLInputElement;
+    const files = [...(target.files || [])];
+    target.value = "";
     for (const file of files) {
       try {
         const stored = await uploadFile(file);
         pendingImages.push({ id: stored.id, url: stored.url, name: stored.name });
         renderAttachments();
       } catch (error) {
-        toast(error.message, "error");
+        toast(errorText(error), "error");
       }
     }
   });
@@ -331,7 +397,7 @@ export async function renderChat(root, ctx) {
   /* Push to talk                                                     */
   /* ---------------------------------------------------------------- */
 
-  function setTalkState(state) {
+  function setTalkState(state: string): void {
     talkState = state;
     const active = state === "starting" || state === "listening";
     talkButton.classList.toggle("btn-secondary", !active);
@@ -354,7 +420,7 @@ export async function renderChat(root, ctx) {
     else setPhase("");
   }
 
-  function finishTalk() {
+  function finishTalk(): void {
     if (talkDisposed || talkCancelled) return;
     const text = `${talkFinal} ${talkInterim}`.replace(/\s+/g, " ").trim();
     const errored = talkErrored;
@@ -371,24 +437,25 @@ export async function renderChat(root, ctx) {
     }
     const existing = input.value.trim();
     input.value = existing ? `${existing} ${text}` : text;
-    sendMessage();
+    void sendMessage();
   }
 
-  function stopTalk() {
+  function stopTalk(): void {
     talkReleaseRequested = true;
     if (talkState === "idle" || talkState === "finishing") return;
     if (talkState === "starting") return;
     setTalkState("finishing");
     try {
       talkRecognition?.stop();
-    } catch (_error) {
+    } catch {
       finishTalk();
     }
   }
 
-  function startTalk() {
+  function startTalk(): void {
     if (
       !speechInputReady ||
+      !SpeechRecognitionCtor ||
       running ||
       !chatModels.length ||
       talkState !== "idle"
@@ -403,19 +470,20 @@ export async function renderChat(root, ctx) {
     // Avoid feeding the assistant's own speech back into the microphone.
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     spoken.pause();
-    talkRecognition = new SpeechRecognition();
-    talkRecognition.lang = navigator.language || "en-US";
-    talkRecognition.continuous = true;
-    talkRecognition.interimResults = true;
-    talkRecognition.maxAlternatives = 1;
+    const recognition = new SpeechRecognitionCtor();
+    talkRecognition = recognition;
+    recognition.lang = navigator.language || "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
 
-    talkRecognition.onstart = () => {
+    recognition.onstart = () => {
       if (talkDisposed || talkCancelled) return;
       if (talkState === "starting") setTalkState("listening");
       if (talkReleaseRequested) stopTalk();
     };
 
-    talkRecognition.onresult = (event) => {
+    recognition.onresult = (event) => {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
@@ -426,22 +494,22 @@ export async function renderChat(root, ctx) {
       talkInterim = interim;
     };
 
-    talkRecognition.onerror = (event) => {
+    recognition.onerror = (event) => {
       if (event.error === "aborted" || talkDisposed || talkCancelled) return;
       talkErrored = true;
-      const messages = {
+      const messagesByError: Record<string, string> = {
         "not-allowed": "Microphone access was denied.",
         "audio-capture": "No microphone was found.",
         "no-speech": "No speech was detected.",
         network: "Speech recognition needs a network connection.",
       };
       toast(
-        messages[event.error] || `Speech recognition failed: ${event.error}`,
+        messagesByError[event.error] || `Speech recognition failed: ${event.error}`,
         event.error === "no-speech" ? "warning" : "error",
       );
     };
 
-    talkRecognition.onend = () => {
+    recognition.onend = () => {
       if (talkDisposed || talkCancelled) return;
       if (!talkReleaseRequested && talkPressed && !talkErrored) {
         // Browsers can end recognition after a pause even while the button is
@@ -449,9 +517,9 @@ export async function renderChat(root, ctx) {
         talkFinal += talkInterim;
         talkInterim = "";
         try {
-          talkRecognition.start();
+          recognition.start();
           return;
-        } catch (_error) {
+        } catch {
           // Fall through and finish with what has been captured.
         }
       }
@@ -460,16 +528,16 @@ export async function renderChat(root, ctx) {
 
     setTalkState("starting");
     try {
-      talkRecognition.start();
+      recognition.start();
     } catch (error) {
       talkRecognition = null;
       talkPressed = false;
-      toast(error.message || "Could not start speech recognition.", "error");
+      toast(errorText(error) || "Could not start speech recognition.", "error");
       setTalkState("idle");
     }
   }
 
-  function cancelTalk() {
+  function cancelTalk(): void {
     talkCancelled = true;
     talkReleaseRequested = true;
     talkPressed = false;
@@ -480,7 +548,7 @@ export async function renderChat(root, ctx) {
     if (recognition) {
       try {
         recognition.abort();
-      } catch (_error) {
+      } catch {
         // Already stopped.
       }
     }
@@ -494,20 +562,20 @@ export async function renderChat(root, ctx) {
     talkPressed = true;
     try {
       talkButton.setPointerCapture(event.pointerId);
-    } catch (_error) {
+    } catch {
       // Pointer capture is optional.
     }
     startTalk();
   });
 
-  function releaseTalk(event) {
+  function releaseTalk(event: PointerEvent): void {
     if (!talkPressed) return;
     talkPressed = false;
     try {
       if (talkButton.hasPointerCapture(event.pointerId)) {
         talkButton.releasePointerCapture(event.pointerId);
       }
-    } catch (_error) {
+    } catch {
       // Pointer capture is optional.
     }
     stopTalk();
@@ -546,7 +614,7 @@ export async function renderChat(root, ctx) {
   /* Speech                                                           */
   /* ---------------------------------------------------------------- */
 
-  function populateBrowserVoices() {
+  function populateBrowserVoices(): void {
     if (!("speechSynthesis" in window)) return;
     const voices = window.speechSynthesis.getVoices();
     browserVoiceSelect.innerHTML =
@@ -559,7 +627,7 @@ export async function renderChat(root, ctx) {
         .join("");
   }
 
-  function speakReply(text) {
+  function speakReply(text: string): void {
     if (settings.engine !== "browser" || !text.trim() || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -569,7 +637,7 @@ export async function renderChat(root, ctx) {
     window.speechSynthesis.speak(utterance);
   }
 
-  function updateSpeechVisibility() {
+  function updateSpeechVisibility(): void {
     const engine = settings.engine;
     const server = isServerEngine(engine);
     browserVoiceWrap.classList.toggle("hidden", engine !== "browser");
@@ -577,13 +645,15 @@ export async function renderChat(root, ctx) {
     spokenWrap.classList.toggle("hidden", !server || !spoken.src);
   }
 
-  async function refreshSpeechVoices() {
+  async function refreshSpeechVoices(): Promise<void> {
     const model = selectedTtsModel();
     if (!model) return;
-    const button = $("[data-refresh-voices]");
+    const button = root.querySelector<HTMLElement>("[data-refresh-voices]");
     setButtonBusy(button, true, "Loading…");
     try {
-      const data = await api(`/api/audio/voices?model_id=${encodeURIComponent(model.id)}`);
+      const data = await api<ChatStatusResponse>(
+        `/api/audio/voices?model_id=${encodeURIComponent(model.id)}`,
+      );
       // The user may have switched speech models while the request was in
       // flight; ignore a response for a model that is no longer selected.
       if (settings.engine !== model.id) return;
@@ -606,7 +676,7 @@ export async function renderChat(root, ctx) {
         .join("");
       toast(`Loaded ${ttsVoices.length} voice${ttsVoices.length === 1 ? "" : "s"}.`, "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
@@ -621,13 +691,13 @@ export async function renderChat(root, ctx) {
   /* Personas                                                         */
   /* ---------------------------------------------------------------- */
 
-  function personaVoice(engine) {
+  function personaVoice(engine: string): string {
     if (engine === "browser") return settings.browserVoice;
     if (isServerEngine(engine)) return settings.ttsVoice;
     return "";
   }
 
-  function personaValues() {
+  function personaValues(): ChatPersonaSettings {
     return {
       system_prompt: settings.systemPrompt,
       voice_engine: settings.engine,
@@ -635,7 +705,7 @@ export async function renderChat(root, ctx) {
     };
   }
 
-  function personaMatches(persona) {
+  function personaMatches(persona: ChatPersonaSettings | undefined): boolean {
     if (!persona) return false;
     const engine = persona.voice_engine || "off";
     return (
@@ -645,14 +715,14 @@ export async function renderChat(root, ctx) {
     );
   }
 
-  function updatePersonaButtons() {
+  function updatePersonaButtons(): void {
     const hasSelection = Boolean(selectedPersona);
     personaDeleteButton.disabled = !hasSelection;
     personaDeleteButton.classList.toggle("opacity-40", !hasSelection);
     personaDeleteButton.classList.toggle("cursor-not-allowed", !hasSelection);
   }
 
-  function renderPersonaSelect() {
+  function renderPersonaSelect(): void {
     const names = Object.keys(personas);
     if (selectedPersona && !personas[selectedPersona]) selectedPersona = "";
     personaSelect.innerHTML =
@@ -667,14 +737,14 @@ export async function renderChat(root, ctx) {
     updatePersonaButtons();
   }
 
-  function markPersonaDirty() {
+  function markPersonaDirty(): void {
     if (!selectedPersona) return;
     selectedPersona = "";
     settings.persona = "";
     renderPersonaSelect();
   }
 
-  async function applyPersona(persona) {
+  async function applyPersona(persona: ChatPersonaSettings): Promise<void> {
     settings.systemPrompt = persona.system_prompt || "";
     settings.engine = persona.voice_engine || "off";
     systemInput.value = settings.systemPrompt;
@@ -695,7 +765,7 @@ export async function renderChat(root, ctx) {
     }
   }
 
-  function openPersonaDialog() {
+  function openPersonaDialog(): void {
     const body = document.createElement("div");
     body.className = "space-y-3";
     body.innerHTML = `
@@ -717,11 +787,11 @@ export async function renderChat(root, ctx) {
       content: body,
       footer,
     });
-    const nameInput = body.querySelector("#chat-persona-name");
-    const confirmButton = footer.querySelector("[data-confirm]");
-    const cancelButton = footer.querySelector("[data-cancel]");
+    const nameInput = queryElement<HTMLInputElement>(body, "#chat-persona-name");
+    const confirmButton = queryElement<HTMLElement>(footer, "[data-confirm]");
+    const cancelButton = queryElement<HTMLElement>(footer, "[data-cancel]");
 
-    const save = async () => {
+    const save = async (): Promise<void> => {
       const name = nameInput.value.trim();
       if (!name) {
         toast("Type a persona name first.", "warning");
@@ -737,7 +807,7 @@ export async function renderChat(root, ctx) {
       }
       setButtonBusy(confirmButton, true, "Saving…");
       try {
-        const data = await api("/api/chat/personas", {
+        const data = await api<ChatStatusResponse>("/api/chat/personas", {
           method: "POST",
           body: { name, ...personaValues() },
         });
@@ -751,17 +821,19 @@ export async function renderChat(root, ctx) {
         modal.close();
         toast(`Saved persona “${name}”.`, "success");
       } catch (error) {
-        toast(error.message, "error");
+        toast(errorText(error), "error");
         setButtonBusy(confirmButton, false);
       }
     };
 
     cancelButton.addEventListener("click", () => modal.close());
-    confirmButton.addEventListener("click", save);
+    confirmButton.addEventListener("click", () => {
+      void save();
+    });
     nameInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        save();
+        void save();
       }
     });
   }
@@ -775,7 +847,7 @@ export async function renderChat(root, ctx) {
       if (name && personas[name]) await applyPersona(personas[name]);
       else saveSettings(settings);
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     }
     renderPersonaSelect();
   });
@@ -793,7 +865,7 @@ export async function renderChat(root, ctx) {
     if (!okay) return;
     setButtonBusy(personaDeleteButton, true, "Deleting…");
     try {
-      const data = await api("/api/chat/personas/delete", {
+      const data = await api<ChatStatusResponse>("/api/chat/personas/delete", {
         method: "POST",
         body: { name },
       });
@@ -806,7 +878,7 @@ export async function renderChat(root, ctx) {
       renderPersonaSelect();
       toast("Persona deleted.", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(personaDeleteButton, false);
       updatePersonaButtons();
@@ -832,7 +904,7 @@ export async function renderChat(root, ctx) {
     saveSettings(settings);
     updateSpeechVisibility();
     if (isServerEngine(settings.engine) && ttsVoicesModel !== settings.engine) {
-      refreshSpeechVoices();
+      void refreshSpeechVoices();
     }
   });
   browserVoiceSelect.addEventListener("change", () => {
@@ -845,7 +917,9 @@ export async function renderChat(root, ctx) {
     markPersonaDirty();
     saveSettings(settings);
   });
-  $("[data-refresh-voices]")?.addEventListener("click", refreshSpeechVoices);
+  root.querySelector("[data-refresh-voices]")?.addEventListener("click", () => {
+    void refreshSpeechVoices();
+  });
   updateSpeechVisibility();
 
   // Restore the persona label only when the persisted settings still match it;
@@ -868,41 +942,41 @@ export async function renderChat(root, ctx) {
   /* Model load / unload                                              */
   /* ---------------------------------------------------------------- */
 
-  function setModelStatus(status, loaded) {
+  function setModelStatus(status: string, loaded: boolean): void {
     statusText = status;
     chatStatus.textContent = status;
     modelChip.textContent = loaded ? "Loaded" : "Idle";
     modelChip.className = `chip ${loaded ? "chip-success" : ""}`;
   }
 
-  $("[data-load]")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
+  root.querySelector("[data-load]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLElement | null;
     setButtonBusy(button, true, "Loading…");
     try {
-      const result = await api("/api/chat/load", {
+      const result = await api<ChatStatusResponse>("/api/chat/load", {
         method: "POST",
         body: { path: modelSelect.value },
       });
-      setModelStatus(result.status, result.loaded);
-      ctx.refreshStatus?.();
+      setModelStatus(result.status || "", Boolean(result.loaded));
+      void ctx.refreshStatus();
       toast("Chat model loaded.", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
   });
 
-  $("[data-unload]")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
+  root.querySelector("[data-unload]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLElement | null;
     setButtonBusy(button, true, "Unloading…");
     try {
-      const result = await api("/api/chat/unload", { method: "POST" });
-      setModelStatus(result.status, result.loaded);
-      ctx.refreshStatus?.();
+      const result = await api<ChatStatusResponse>("/api/chat/unload", { method: "POST" });
+      setModelStatus(result.status || "", Boolean(result.loaded));
+      void ctx.refreshStatus();
       toast("Chat model unloaded.", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
@@ -918,7 +992,7 @@ export async function renderChat(root, ctx) {
   /* Send / stop                                                      */
   /* ---------------------------------------------------------------- */
 
-  function setRunning(value) {
+  function setRunning(value: boolean): void {
     running = value;
     sendButton.disabled = value;
     sendButton.innerHTML = value ? `${spinner("h-3.5 w-3.5")} Sending…` : `${icon("send", "h-4 w-4")} Send`;
@@ -927,19 +1001,19 @@ export async function renderChat(root, ctx) {
       value || !speechInputReady || !chatModels.length || talkState === "finishing";
   }
 
-  function setPhase(text) {
+  function setPhase(text: string | undefined): void {
     phaseText = text || "";
     phaseChip.textContent = phaseText;
     phaseChip.classList.toggle("hidden", !phaseText);
     phaseChip.className = `chip ${phaseText ? "chip-warn" : ""} hidden sm:inline-flex`;
   }
 
-  async function sendMessage() {
+  async function sendMessage(): Promise<void> {
     if (running || talkState !== "idle") return;
     const text = input.value.trim();
     if (!text && !pendingImages.length) return;
 
-    const userMessage = {
+    const userMessage: ChatMessage = {
       role: "user",
       content: text,
       images: pendingImages,
@@ -950,7 +1024,7 @@ export async function renderChat(root, ctx) {
     input.value = "";
     input.style.height = "auto";
 
-    const assistant = { role: "assistant", content: "", streaming: true };
+    const assistant: ChatMessage = { role: "assistant", content: "", streaming: true };
     messages.push(assistant);
     renderMessages();
     setRunning(true);
@@ -967,7 +1041,7 @@ export async function renderChat(root, ctx) {
 
     let aborted = false;
     try {
-      await stream(
+      await stream<ChatStreamEvent>(
         "/api/chat/stream",
         {
           messages: requestMessages,
@@ -983,13 +1057,13 @@ export async function renderChat(root, ctx) {
           if (event.type === "phase") {
             setPhase(event.message);
           } else if (event.type === "model") {
-            setModelStatus(event.status, event.loaded);
-            ctx.refreshStatus?.();
+            setModelStatus(event.status || "", Boolean(event.loaded));
+            void ctx.refreshStatus();
           } else if (event.type === "chunk") {
-            assistant.content = event.text;
+            assistant.content = event.text || "";
             updateStreamingMessage(assistant);
           } else if (event.type === "audio") {
-            spoken.src = event.url;
+            spoken.src = event.url || "";
             spokenWrap.classList.remove("hidden");
             spoken.play().catch(() => {});
           } else if (event.type === "warning") {
@@ -1006,13 +1080,14 @@ export async function renderChat(root, ctx) {
         controller.signal,
       );
     } catch (error) {
-      if (error.name === "AbortError") {
+      if ((error as Error).name === "AbortError") {
         aborted = true;
       } else {
+        const message = errorText(error);
         assistant.content = assistant.content
-          ? `${assistant.content}\n\n**Error:** ${error.message}`
-          : `**Error:** ${error.message}`;
-        toast(error.message, "error");
+          ? `${assistant.content}\n\n**Error:** ${message}`
+          : `**Error:** ${message}`;
+        toast(message, "error");
       }
     } finally {
       if (aborted && !assistant.content) assistant.stopped = true;
@@ -1027,15 +1102,15 @@ export async function renderChat(root, ctx) {
     }
   }
 
-  async function stopGenerating() {
+  async function stopGenerating(): Promise<void> {
     if (!running) return;
     stopButton.disabled = true;
     let failed = false;
     // Fire the cancel request first, then abort the local stream so the UI
     // responds immediately instead of waiting for the round trip.
-    const cancel = api("/api/chat/cancel", { method: "POST" }).catch((error) => {
+    const cancel = api("/api/chat/cancel", { method: "POST" }).catch((error: unknown) => {
       failed = true;
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     });
     controller?.abort();
     setPhase("Stopping…");
@@ -1045,28 +1120,30 @@ export async function renderChat(root, ctx) {
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    sendMessage();
+    void sendMessage();
   });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      sendMessage();
+      void sendMessage();
     }
   });
   input.addEventListener("input", () => {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 192)}px`;
   });
-  stopButton.addEventListener("click", stopGenerating);
+  stopButton.addEventListener("click", () => {
+    void stopGenerating();
+  });
 
-  $("[data-new-chat]")?.addEventListener("click", (event) => {
+  root.querySelector("[data-new-chat]")?.addEventListener("click", (event) => {
     // The button lives in the Conversation summary; do not toggle the panel.
     event.preventDefault();
     event.stopPropagation();
     if (talkState !== "idle") cancelTalk();
     if (running) {
       controller?.abort();
-      api("/api/chat/cancel", { method: "POST" }).catch(() => {});
+      void api("/api/chat/cancel", { method: "POST" }).catch(() => {});
     }
     messages.length = 0;
     pendingImages = [];
@@ -1085,14 +1162,14 @@ export async function renderChat(root, ctx) {
     if (talkRecognition) {
       try {
         talkRecognition.abort();
-      } catch (_error) {
+      } catch {
         // Already stopped.
       }
       talkRecognition = null;
     }
     if (running) {
       controller?.abort();
-      api("/api/chat/cancel", { method: "POST" }).catch(() => {});
+      void api("/api/chat/cancel", { method: "POST" }).catch(() => {});
     }
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   };

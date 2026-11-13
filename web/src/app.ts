@@ -1,12 +1,27 @@
-import { api } from "./api.js";
-import { icon, setButtonBusy, spinner, toast } from "./ui.js";
-import { renderGenerate } from "./pages/generate.js";
-import { renderChat } from "./pages/chat.js";
-import { renderTTS } from "./pages/tts.js";
-import { renderGallery } from "./pages/gallery.js";
-import { renderOther } from "./pages/other.js";
+import { api, errorText } from "./api";
+import { icon, setButtonBusy, spinner, toast } from "./ui";
+import { renderGenerate } from "./pages/generate";
+import { renderChat } from "./pages/chat";
+import { renderTTS } from "./pages/tts";
+import { renderGallery } from "./pages/gallery";
+import { renderOther } from "./pages/other";
+import type {
+  Bootstrap,
+  PageRenderer,
+  RenderContext,
+  ServerStatus,
+} from "./types";
 
-const ROUTES = [
+interface Route {
+  key: string;
+  label: string;
+  title: string;
+  subtitle: string;
+  icon: string;
+  render: PageRenderer;
+}
+
+const ROUTES: Route[] = [
   {
     key: "generate",
     label: "Generate",
@@ -65,7 +80,14 @@ const ROUTES = [
   },
 ];
 
-const state = {
+const state: {
+  boot: Bootstrap | null;
+  page: string | null;
+  cleanup: (() => void) | null;
+  comfyBusy: boolean;
+  chatBusy: boolean;
+  audioBusy: boolean;
+} = {
   boot: null,
   page: null,
   cleanup: null,
@@ -75,15 +97,29 @@ const state = {
 };
 
 /* ------------------------------------------------------------------ */
+/* DOM helpers                                                         */
+/* ------------------------------------------------------------------ */
+
+function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
+  return document.getElementById(id) as T | null;
+}
+
+function requireId<T extends HTMLElement = HTMLElement>(id: string): T {
+  const element = byId<T>(id);
+  if (!element) throw new Error(`Missing element #${id}`);
+  return element;
+}
+
+/* ------------------------------------------------------------------ */
 /* Theme                                                               */
 /* ------------------------------------------------------------------ */
 
-function isLightTheme() {
+function isLightTheme(): boolean {
   return document.documentElement.classList.contains("light");
 }
 
-function updateThemeButton() {
-  const button = document.getElementById("theme-toggle");
+function updateThemeButton(): void {
+  const button = byId("theme-toggle");
   if (!button) return;
   const light = isLightTheme();
   button.innerHTML = icon(light ? "sun" : "moon", "h-5 w-5");
@@ -92,33 +128,33 @@ function updateThemeButton() {
     "aria-label",
     light ? "Switch to dark theme" : "Switch to light theme",
   );
-  const meta = document.querySelector('meta[name="theme-color"]');
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (meta) meta.content = light ? "#f8fafc" : "#070a12";
 }
 
-function setTheme(light, persist = true) {
+function setTheme(light: boolean, persist = true): void {
   document.documentElement.classList.toggle("light", light);
   if (persist) {
     try {
       localStorage.setItem("opensail.theme", light ? "light" : "dark");
-    } catch (_error) {
+    } catch {
       // Persisting is best-effort.
     }
   }
   updateThemeButton();
 }
 
-function toggleTheme() {
+function toggleTheme(): void {
   setTheme(!isLightTheme());
 }
 
-function followSystemTheme() {
+function followSystemTheme(): void {
   const query = window.matchMedia("(prefers-color-scheme: light)");
-  const apply = (event) => {
-    let saved = null;
+  const apply = (event: MediaQueryListEvent): void => {
+    let saved: string | null = null;
     try {
       saved = localStorage.getItem("opensail.theme");
-    } catch (_error) {
+    } catch {
       saved = null;
     }
     if (!saved) setTheme(event.matches, false);
@@ -127,14 +163,18 @@ function followSystemTheme() {
   else query.addListener(apply);
 }
 
-const ctx = {
+/* ------------------------------------------------------------------ */
+/* Shared page context                                                 */
+/* ------------------------------------------------------------------ */
+
+const ctx: RenderContext = {
   get boot() {
     return state.boot;
   },
   api,
   toast,
   refreshStatus: () => refreshConnectionStatus(),
-  navigate: (page) => {
+  navigate: (page: string) => {
     window.location.hash = `#${page}`;
   },
 };
@@ -143,13 +183,14 @@ const ctx = {
 /* Navigation                                                          */
 /* ------------------------------------------------------------------ */
 
-function currentRoute() {
+function currentRoute(): Route {
   const key = (window.location.hash || "#generate").replace(/^#/, "");
-  return ROUTES.find((route) => route.key === key) || ROUTES[0];
+  return ROUTES.find((route) => route.key === key) ?? ROUTES[0];
 }
 
-function renderNav() {
-  const nav = document.getElementById("nav-list");
+function renderNav(): void {
+  const nav = byId("nav-list");
+  if (!nav) return;
   const route = currentRoute();
   nav.innerHTML = ROUTES.map(
     (item) => `
@@ -162,18 +203,18 @@ function renderNav() {
   ).join("");
 }
 
-function setSidebar(open) {
-  const sidebar = document.getElementById("sidebar");
-  const overlay = document.getElementById("mobile-overlay");
-  sidebar.classList.toggle("-translate-x-full", !open);
-  overlay.classList.toggle("hidden", !open);
+function setSidebar(open: boolean): void {
+  const sidebar = byId("sidebar");
+  const overlay = byId("mobile-overlay");
+  sidebar?.classList.toggle("-translate-x-full", !open);
+  overlay?.classList.toggle("hidden", !open);
 }
 
 /* ------------------------------------------------------------------ */
 /* Page lifecycle                                                      */
 /* ------------------------------------------------------------------ */
 
-async function navigate() {
+async function navigate(): Promise<void> {
   const route = currentRoute();
   if (state.page === route.key && state.cleanup !== null) {
     // Same page: only re-render when the user pressed Refresh (handled below).
@@ -184,11 +225,11 @@ async function navigate() {
   state.page = route.key;
 
   renderNav();
-  document.getElementById("page-title").textContent = route.title;
-  document.getElementById("page-subtitle").textContent = route.subtitle;
+  requireId("page-title").textContent = route.title;
+  requireId("page-subtitle").textContent = route.subtitle;
   setSidebar(false);
 
-  const main = document.getElementById("main");
+  const main = requireId("main");
   main.innerHTML = `
     <div class="flex min-h-[55vh] flex-col items-center justify-center gap-3 text-slate-500">
       ${spinner("h-7 w-7")}
@@ -208,14 +249,14 @@ async function navigate() {
           ${icon("alert", "h-6 w-6")}
         </div>
         <h2 class="text-base font-semibold text-slate-100">Could not load this page</h2>
-        <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-400">${String(error.message || error)}</p>
+        <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-400">${errorText(error)}</p>
         <button class="btn-primary mt-5" id="page-retry">Try again</button>
       </div>
     `;
     main.querySelector("#page-retry")?.addEventListener("click", () => {
       state.cleanup = null;
       state.page = null;
-      navigate();
+      void navigate();
     });
     state.cleanup = () => {};
   }
@@ -225,19 +266,31 @@ async function navigate() {
 /* Connection status                                                   */
 /* ------------------------------------------------------------------ */
 
-const SERVICE_TONES = {
+type Tone = "ok" | "warn" | "error" | "idle";
+
+const SERVICE_TONES: Record<Tone, { dot: string; text: string }> = {
   ok: { dot: "bg-emerald-400", text: "text-emerald-300" },
   warn: { dot: "bg-amber-400", text: "text-amber-300" },
   error: { dot: "bg-rose-400", text: "text-rose-300" },
   idle: { dot: "bg-slate-500", text: "text-slate-500" },
 };
 
-function updateServiceRow(key, { tone, label, detail, action = false }) {
+interface ServiceRowOptions {
+  tone: Tone;
+  label: string;
+  detail?: string;
+  action?: boolean;
+}
+
+function updateServiceRow(
+  key: string,
+  { tone, label, detail, action = false }: ServiceRowOptions,
+): void {
   const colors = SERVICE_TONES[tone] || SERVICE_TONES.idle;
-  const dot = document.getElementById(`${key}-dot`);
-  const badge = document.getElementById(`${key}-badge`);
-  const detailEl = document.getElementById(`${key}-detail`);
-  const button = document.getElementById(`${key}-unload`);
+  const dot = byId(`${key}-dot`);
+  const badge = byId(`${key}-badge`);
+  const detailEl = byId(`${key}-detail`);
+  const button = byId<HTMLButtonElement>(`${key}-unload`);
 
   if (dot) dot.className = `h-1.5 w-1.5 shrink-0 rounded-full ${colors.dot}`;
   if (badge) {
@@ -248,9 +301,15 @@ function updateServiceRow(key, { tone, label, detail, action = false }) {
   if (button) button.disabled = !action;
 }
 
-function updateComfyControls({ connected, managed, configured }) {
-  const start = document.getElementById("comfy-start");
-  const stop = document.getElementById("comfy-stop");
+interface ComfyControls {
+  connected: boolean;
+  managed: boolean;
+  configured: boolean;
+}
+
+function updateComfyControls({ connected, managed, configured }: ComfyControls): void {
+  const start = byId<HTMLButtonElement>("comfy-start");
+  const stop = byId<HTMLButtonElement>("comfy-stop");
   if (!start || !stop) return;
 
   start.disabled = state.comfyBusy || connected || managed || !configured;
@@ -265,7 +324,7 @@ function updateComfyControls({ connected, managed, configured }) {
     ? "Stop the ComfyUI process started by OpenSail"
     : "ComfyUI was not started by OpenSail";
 
-  let tone = "idle";
+  let tone: Tone = "idle";
   let label = "Not configured";
   if (connected) {
     tone = "ok";
@@ -279,7 +338,7 @@ function updateComfyControls({ connected, managed, configured }) {
   }
   updateServiceRow("comfy", { tone, label });
 
-  const badge = document.getElementById("comfy-badge");
+  const badge = byId("comfy-badge");
   if (badge) {
     badge.title = connected
       ? managed
@@ -289,7 +348,7 @@ function updateComfyControls({ connected, managed, configured }) {
   }
 }
 
-function updateChatRow({ loaded, model }) {
+function updateChatRow({ loaded, model }: { loaded: boolean; model?: string | null }): void {
   if (!state.boot?.chat_models?.length) {
     updateServiceRow("chat", {
       tone: "idle",
@@ -314,7 +373,7 @@ function updateChatRow({ loaded, model }) {
   }
 }
 
-function updateAudioRow({ loaded }) {
+function updateAudioRow({ loaded }: { loaded: boolean }): void {
   if (!state.boot?.tts_models?.length) {
     updateServiceRow("audio", {
       tone: "idle",
@@ -339,8 +398,18 @@ function updateAudioRow({ loaded }) {
   }
 }
 
-function updateConnectionChip({ connected = false, managed = false, unreachable = false }) {
-  const chip = document.getElementById("connection-chip");
+interface ConnectionChipOptions {
+  connected?: boolean;
+  managed?: boolean;
+  unreachable?: boolean;
+}
+
+function updateConnectionChip({
+  connected = false,
+  managed = false,
+  unreachable = false,
+}: ConnectionChipOptions = {}): void {
+  const chip = byId("connection-chip");
   if (!chip) return;
 
   let color = "bg-rose-400";
@@ -361,10 +430,10 @@ function updateConnectionChip({ connected = false, managed = false, unreachable 
   chip.innerHTML = `<span class="h-1.5 w-1.5 rounded-full ${color}"></span><span>${label}</span>`;
 }
 
-function applyBootStatus() {
+function applyBootStatus(): void {
   const boot = state.boot;
   if (!boot) return;
-  document.getElementById("comfy-url").textContent = boot.comfy_url || "Unknown";
+  requireId("comfy-url").textContent = boot.comfy_url || "Unknown";
   updateComfyControls({
     connected: Boolean(boot.comfy_managed),
     managed: Boolean(boot.comfy_managed),
@@ -377,9 +446,9 @@ function applyBootStatus() {
   updateAudioRow({ loaded: Boolean(boot.audio_loaded) });
 }
 
-async function refreshConnectionStatus() {
+async function refreshConnectionStatus(): Promise<void> {
   try {
-    const status = await api("/api/status");
+    const status = await api<ServerStatus>("/api/status");
     const connected = Boolean(status.comfy);
     const managed = Boolean(status.comfy_managed);
     updateConnectionChip({ connected, managed });
@@ -393,7 +462,7 @@ async function refreshConnectionStatus() {
       model: status.chat_model,
     });
     updateAudioRow({ loaded: Boolean(status.audio_loaded) });
-  } catch (_error) {
+  } catch {
     updateConnectionChip({ unreachable: true });
     updateComfyControls({
       connected: false,
@@ -403,15 +472,15 @@ async function refreshConnectionStatus() {
   }
 }
 
-async function unloadChat() {
-  const button = document.getElementById("chat-unload");
+async function unloadChat(): Promise<void> {
+  const button = byId("chat-unload");
   state.chatBusy = true;
   setButtonBusy(button, true, "Unloading…");
   try {
-    const result = await api("/api/chat/unload", { method: "POST" });
+    const result = await api<{ status?: string }>("/api/chat/unload", { method: "POST" });
     toast(result.status || "Chat model unloaded.", "success");
   } catch (error) {
-    toast(error.message, "error");
+    toast(errorText(error), "error");
   } finally {
     state.chatBusy = false;
     setButtonBusy(button, false);
@@ -419,15 +488,15 @@ async function unloadChat() {
   }
 }
 
-async function unloadAudio() {
-  const button = document.getElementById("audio-unload");
+async function unloadAudio(): Promise<void> {
+  const button = byId("audio-unload");
   state.audioBusy = true;
   setButtonBusy(button, true, "Stopping…");
   try {
-    const result = await api("/api/audio/unload", { method: "POST" });
+    const result = await api<{ status?: string }>("/api/audio/unload", { method: "POST" });
     toast(result.status || "audio.cpp server stopped.", "success");
   } catch (error) {
-    toast(error.message, "error");
+    toast(errorText(error), "error");
   } finally {
     state.audioBusy = false;
     setButtonBusy(button, false);
@@ -435,15 +504,15 @@ async function unloadAudio() {
   }
 }
 
-async function startComfy() {
-  const button = document.getElementById("comfy-start");
+async function startComfy(): Promise<void> {
+  const button = byId("comfy-start");
   state.comfyBusy = true;
   setButtonBusy(button, true, "Starting…");
   try {
-    const result = await api("/api/comfy/start", { method: "POST" });
+    const result = await api<{ status?: string }>("/api/comfy/start", { method: "POST" });
     toast(result.status || "ComfyUI started.", "success");
   } catch (error) {
-    toast(error.message, "error");
+    toast(errorText(error), "error");
   } finally {
     state.comfyBusy = false;
     setButtonBusy(button, false);
@@ -451,15 +520,15 @@ async function startComfy() {
   }
 }
 
-async function stopComfy() {
-  const button = document.getElementById("comfy-stop");
+async function stopComfy(): Promise<void> {
+  const button = byId("comfy-stop");
   state.comfyBusy = true;
   setButtonBusy(button, true, "Stopping…");
   try {
-    const result = await api("/api/comfy/stop", { method: "POST" });
+    const result = await api<{ status?: string }>("/api/comfy/stop", { method: "POST" });
     toast(result.status || "ComfyUI stopped.", "success");
   } catch (error) {
-    toast(error.message, "error");
+    toast(errorText(error), "error");
   } finally {
     state.comfyBusy = false;
     setButtonBusy(button, false);
@@ -471,43 +540,35 @@ async function stopComfy() {
 /* Boot                                                                */
 /* ------------------------------------------------------------------ */
 
-async function boot() {
+async function bootApp(): Promise<void> {
   updateThemeButton();
   followSystemTheme();
-  document
-    .getElementById("theme-toggle")
-    .addEventListener("click", toggleTheme);
-  document
-    .getElementById("menu-button")
-    .addEventListener("click", () => setSidebar(true));
-  document
-    .getElementById("sidebar-close")
-    .addEventListener("click", () => setSidebar(false));
-  document
-    .getElementById("mobile-overlay")
-    .addEventListener("click", () => setSidebar(false));
-  document.getElementById("comfy-start").addEventListener("click", startComfy);
-  document.getElementById("comfy-stop").addEventListener("click", stopComfy);
-  document.getElementById("chat-unload").addEventListener("click", unloadChat);
-  document.getElementById("audio-unload").addEventListener("click", unloadAudio);
+  requireId("theme-toggle").addEventListener("click", toggleTheme);
+  requireId("menu-button").addEventListener("click", () => setSidebar(true));
+  requireId("sidebar-close").addEventListener("click", () => setSidebar(false));
+  requireId("mobile-overlay").addEventListener("click", () => setSidebar(false));
+  requireId("comfy-start").addEventListener("click", startComfy);
+  requireId("comfy-stop").addEventListener("click", stopComfy);
+  requireId("chat-unload").addEventListener("click", unloadChat);
+  requireId("audio-unload").addEventListener("click", unloadAudio);
 
   window.addEventListener("hashchange", () => {
     state.cleanup?.();
     state.cleanup = null;
     state.page = null;
-    navigate();
+    void navigate();
   });
 
   try {
-    state.boot = await api("/api/bootstrap");
+    state.boot = await api<Bootstrap>("/api/bootstrap");
   } catch (error) {
-    document.getElementById("main").innerHTML = `
+    requireId("main").innerHTML = `
       <div class="card mx-auto mt-10 max-w-lg p-6 text-center">
         <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-300">
           ${icon("alert", "h-6 w-6")}
         </div>
         <h2 class="text-base font-semibold text-slate-100">OpenSail could not start</h2>
-        <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-400">${String(error.message || error)}</p>
+        <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-400">${errorText(error)}</p>
         <button class="btn-primary mt-5" onclick="window.location.reload()">Reload</button>
       </div>
     `;
@@ -517,8 +578,8 @@ async function boot() {
   renderNav();
   applyBootStatus();
   await navigate();
-  refreshConnectionStatus();
+  void refreshConnectionStatus();
   setInterval(refreshConnectionStatus, 30000);
 }
 
-boot();
+void bootApp();

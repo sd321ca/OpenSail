@@ -2,15 +2,24 @@
 
 ## Declarative field registry
 
-Applies to: `comfyui_ui/**/*.py`, `web/assets/**/*.js`, `configs/fields.json`, `configs/workflow_fields.json`.
+Applies to: `comfyui_ui/**/*.py`, `web/src/**/*.ts`, `configs/fields.json`, `configs/workflow_fields.json`.
 
-The Generate page's input controls are defined declaratively in `configs/fields.json` and loaded via `comfyui_ui/fields.py`. To add or change an input, edit `configs/fields.json` (add a `fields` entry) rather than hard-coding a control in `web/assets/pages/generate.js`. Node candidates, widget selection and current values are driven by each field's optional `match` spec (or key-based fallback) via `comfyui_ui/workflows.py` (`list_node_candidates`, `get_selected_bindings`, `build_workflow_from_bindings`). Which node inputs each workflow shows is saved per workflow in `configs/workflow_fields.json` as `node_id|input_key|visible|display_name` entries, where `visible` is `true` or `false`. The Generate page updates it through `comfyui_ui/fields.py` (`get_saved_fields`, `save_workflow_fields`) and the API in `comfyui_ui/server.py`.
+The Generate page's input controls are defined declaratively in `configs/fields.json` and loaded via `comfyui_ui/fields.py`. To add or change an input, edit `configs/fields.json` (add a `fields` entry) rather than hard-coding a control in `web/src/pages/generate.ts`. Node candidates, widget selection and current values are driven by each field's optional `match` spec (or key-based fallback) via `comfyui_ui/workflows.py` (`list_node_candidates`, `get_selected_bindings`, `build_workflow_from_bindings`). Which node inputs each workflow shows is saved per workflow in `configs/workflow_fields.json` as `node_id|input_key|visible|display_name` entries, where `visible` is `true` or `false`. The Generate page updates it through `comfyui_ui/fields.py` (`get_saved_fields`, `save_workflow_fields`) and the API in `comfyui_ui/server.py`.
 
 ## Frontend build
 
-Applies to: `web/**`, `tailwind.config.js`, `package.json`.
+Applies to: `web/**`, `tailwind.config.js`, `package.json`, `vite.config.mts`, `tsconfig.json`.
 
-The dashboard is a static single-page app in `web/` using Tailwind CSS. UI changes go in `web/assets/pages/*.js`; shared helpers are in `web/assets/ui.js` and API/SSE plumbing in `web/assets/api.js`. After changing classes or markup, rebuild the committed stylesheet with `npm run build:css` (Tailwind scans `web/**/*.{html,js}`). The generated `web/assets/styles.css` is committed; `node_modules/` is not.
+The dashboard client is TypeScript built with Vite. Sources live in `web/src/` (`app.ts` is the shell, `pages/*.ts` the page renderers, `api.ts`/`ui.ts`/`audio.ts` the shared helpers, `types.ts` the payload interfaces). Vite bundles them to the committed `web/assets/app.js`, which `web/index.html` loads from its stable `/assets/app.js` URL; `comfyui_ui/server.py` serves that directory unchanged, so the build output—not the sources—is what the browser runs.
+
+Two commands, both of which must run after a client change:
+
+- `npm run typecheck` — `tsc --noEmit`; the project is `strict`.
+- `npm run build:js` — Vite build (or `npm run watch:js` while iterating). `npm run build` runs the JS build and `npm run build:css`.
+
+`npm run dev` runs the Vite dev server on :5173 with HMR, proxying `/api`, `/free`, `/history` and `/favicon.ico` to the FastAPI app on :7860; run `python app.py` alongside it. A dev-only plugin rewrites the `index.html` script tag to `/src/app.ts`, so `web/index.html` keeps pointing at the built bundle.
+
+Tailwind scans `web/index.html`, `web/assets/pages/*.html` and `web/src/**/*.ts` (see `tailwind.config.js`) and writes the committed `web/assets/styles.css` (`npm run build:css`). Both generated artefacts—`web/assets/app.js` and `web/assets/styles.css`—are committed so a normal install needs only Python; `node_modules/` is not committed, and source maps are git-ignored because `npm run build:js` regenerates them.
 
 The palette is driven by CSS variables in `web/assets/input.css`: `:root` holds the dark theme and `html.light` the light theme. Prefer the `ink-*` / `slate-*` utilities so both themes follow automatically; add explicit `html.light` overrides when introducing a fixed colour or white-alpha surface. For repeated surfaces and separators use the semantic `bg-raised`, `border-subtle`, and `border-strong` utilities; their dark/light values live in `--surface-raised` and `--line-*`, so contrast changes happen in one place.
 

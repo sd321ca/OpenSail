@@ -1,7 +1,17 @@
-import { api } from "../api.js";
-import { confirmDialog, icon, setButtonBusy, toast } from "../ui.js";
+import { api, errorText } from "../api";
+import { confirmDialog, icon, setButtonBusy, toast } from "../ui";
 
-export async function renderOther(root) {
+interface PostActionOptions {
+  busyLabel: string;
+  successMessage: string;
+  confirm?: {
+    message: string;
+    options?: { title?: string; confirmLabel?: string; danger?: boolean };
+  };
+  body?: unknown;
+}
+
+export async function renderOther(root: HTMLElement): Promise<() => void> {
   root.innerHTML = `
     <div class="mx-auto max-w-2xl space-y-5">
       <section class="card">
@@ -45,7 +55,11 @@ export async function renderOther(root) {
     </div>
   `;
 
-  async function postAction(button, path, { busyLabel, successMessage, confirm, body }) {
+  async function postAction(
+    button: HTMLElement,
+    path: string,
+    { busyLabel, successMessage, confirm, body }: PostActionOptions,
+  ): Promise<void> {
     if (confirm) {
       const okay = await confirmDialog(confirm.message, confirm.options);
       if (!okay) return;
@@ -53,36 +67,36 @@ export async function renderOther(root) {
 
     setButtonBusy(button, true, busyLabel);
     try {
-      const result = await api(path, { method: "POST", body });
+      const result = await api<{ status?: string }>(path, { method: "POST", body });
       toast(result?.status || successMessage, "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
   }
 
-  const unloadButton = root.querySelector("[data-unload-models]");
-  unloadButton.addEventListener("click", () => {
-    postAction(unloadButton, "/free", {
+  const unloadButton = root.querySelector<HTMLElement>("[data-unload-models]");
+  unloadButton?.addEventListener("click", () => {
+    void postAction(unloadButton, "/free", {
       busyLabel: "Unloading…",
       successMessage: "Models unloaded.",
       body: { unload_models: true, free_memory: false },
     });
   });
 
-  const freeButton = root.querySelector("[data-free-memory]");
-  freeButton.addEventListener("click", () => {
-    postAction(freeButton, "/free", {
+  const freeButton = root.querySelector<HTMLElement>("[data-free-memory]");
+  freeButton?.addEventListener("click", () => {
+    void postAction(freeButton, "/free", {
       busyLabel: "Freeing…",
       successMessage: "Memory freed.",
       body: { unload_models: false, free_memory: true },
     });
   });
 
-  const clearButton = root.querySelector("[data-clear]");
-  clearButton.addEventListener("click", () => {
-    postAction(clearButton, "/history", {
+  const clearButton = root.querySelector<HTMLElement>("[data-clear]");
+  clearButton?.addEventListener("click", () => {
+    void postAction(clearButton, "/history", {
       busyLabel: "Clearing…",
       successMessage: "History cleared.",
       confirm: {

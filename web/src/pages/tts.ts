@@ -1,29 +1,65 @@
-import { api, stream, uploadFile } from "../api.js";
-import { openAudioTrimmer } from "../audio.js";
+import { api, errorText, stream, uploadFile } from "../api";
+import { openAudioTrimmer } from "../audio";
 import {
   confirmDialog,
   emptyState,
   escapeHtml,
   icon,
+  queryElement,
   setButtonBusy,
   spinner,
   toast,
-} from "../ui.js";
+} from "../ui";
+import type { RenderContext } from "../types";
 
-export async function renderTTS(root, ctx) {
+/** A previously uploaded clip used as a cloning reference. */
+interface AudioReference {
+  id: string;
+  url: string;
+  name: string;
+}
+
+/** The generated clip shown in the Output panel. */
+interface TtsResult {
+  url: string;
+  filename?: string;
+}
+
+interface AudioStatusResponse {
+  status?: string;
+  loaded?: boolean;
+  voices?: string[];
+  name?: string;
+}
+
+interface VoicesResponse {
+  voices?: string[];
+}
+
+/** Events streamed by ``POST /api/audio/generate``. */
+interface TtsStreamEvent {
+  type?: string;
+  message?: string;
+  url?: string;
+}
+
+export async function renderTTS(
+  root: HTMLElement,
+  ctx: RenderContext,
+): Promise<() => void> {
   const boot = ctx.boot;
+  if (!boot) throw new Error("TTS page requires the bootstrap payload.");
   const models = boot.audio_models || [];
   let modelId = boot.default_audio_model || models[0]?.id || "";
-  let voices = [];
-  let savedVoices = [];
-  let reference = null;
+  let voices: string[] = [];
+  let savedVoices: string[] = [];
+  let reference: AudioReference | null = null;
   let referenceTranscript = "";
   let voiceName = "";
   let running = false;
-  let controller = null;
-  let result = null;
+  let controller: AbortController | null = null;
+  let result: TtsResult | null = null;
   let statusText = boot.audio_status || "audio.cpp server not running.";
-  let phaseText = "";
 
   root.innerHTML = `
     <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -147,55 +183,56 @@ export async function renderTTS(root, ctx) {
     </div>
   `;
 
-  const $ = (selector) => root.querySelector(selector);
-  const modelSelect = $("[data-model]");
-  const voiceInput = $("[data-voice]");
-  const status = $("[data-status]");
-  const modelChip = $("[data-model-chip]");
-  const phaseWrap = $("[data-phase-wrap]");
-  const phaseLabel = $("[data-phase]");
-  const resultEl = $("[data-result]");
-  const resultSubtitle = $("[data-result-subtitle]");
-  const download = $("[data-download]");
-  const generateButton = $("[data-generate]");
-  const stopButton = $("[data-stop]");
-  const speedRange = $("[data-speed]");
-  const speedNumber = $("[data-speed-number]");
-  const speedLabel = $("[data-speed-label]");
-  const textInput = $("[data-text]");
+  const $ = <T extends Element>(selector: string): T =>
+    queryElement<T>(root, selector);
+  const modelSelect = root.querySelector<HTMLSelectElement>("[data-model]");
+  const voiceInput = $<HTMLSelectElement>("[data-voice]");
+  const status = $<HTMLElement>("[data-status]");
+  const modelChip = $<HTMLElement>("[data-model-chip]");
+  const phaseWrap = $<HTMLElement>("[data-phase-wrap]");
+  const phaseLabel = $<HTMLElement>("[data-phase]");
+  const resultEl = $<HTMLElement>("[data-result]");
+  const resultSubtitle = $<HTMLElement>("[data-result-subtitle]");
+  const download = $<HTMLAnchorElement>("[data-download]");
+  const generateButton = $<HTMLButtonElement>("[data-generate]");
+  const stopButton = $<HTMLButtonElement>("[data-stop]");
+  const speedRange = $<HTMLInputElement>("[data-speed]");
+  const speedNumber = $<HTMLInputElement>("[data-speed-number]");
+  const speedLabel = $<HTMLElement>("[data-speed-label]");
+  const textInput = $<HTMLTextAreaElement>("[data-text]");
 
-  function setStatus(text, running) {
+  function setStatus(text: string, isRunning?: boolean): void {
     statusText = text;
     status.textContent = text;
-    if (running !== undefined) {
-      modelChip.textContent = running ? "Running" : "Idle";
-      modelChip.className = `chip ${running ? "chip-success" : ""}`;
+    if (isRunning !== undefined) {
+      modelChip.textContent = isRunning ? "Running" : "Idle";
+      modelChip.className = `chip ${isRunning ? "chip-success" : ""}`;
     }
   }
 
-  function renderVoices() {
+  function renderVoices(): void {
     if (!voices.length) {
       voiceInput.innerHTML = '<option value="">Default voice</option>';
       voiceInput.disabled = true;
     } else {
       voiceInput.disabled = false;
       const previous = voiceInput.value;
-      const selected = voices.includes(previous) ? previous : voices[0];
+      const selectedVoice = voices.includes(previous) ? previous : voices[0];
       voiceInput.innerHTML = voices
         .map(
           (voice) =>
-            `<option value="${escapeHtml(voice)}" ${voice === selected ? "selected" : ""}>${escapeHtml(voice)}</option>`,
+            `<option value="${escapeHtml(voice)}" ${voice === selectedVoice ? "selected" : ""}>${escapeHtml(voice)}</option>`,
         )
         .join("");
-      voiceInput.value = selected;
+      voiceInput.value = selectedVoice;
     }
-    $("[data-voice-status]").textContent = voices.length
+    $<HTMLElement>("[data-voice-status]").textContent = voices.length
       ? `${voices.length} voice${voices.length === 1 ? "" : "s"} available.`
       : "Voices are listed from the running server.";
   }
 
-  function renderSavedVoices() {
-    const panel = $("[data-saved-voices-panel]");
+  function renderSavedVoices(): void {
+    const panel = root.querySelector<HTMLElement>("[data-saved-voices-panel]");
     if (!panel) return;
     if (!savedVoices.length) {
       panel.innerHTML = `<p class="text-[11px] leading-5 text-slate-500">No saved custom voices yet. Upload a reference clip above and save it to reuse it here and in Chat.</p>`;
@@ -218,24 +255,24 @@ export async function renderTTS(root, ctx) {
           .join("")}
       </ul>
     `;
-    panel.querySelectorAll("[data-delete-voice]").forEach((button) => {
-      button.addEventListener("click", () =>
-        deleteSavedVoice(button.dataset.deleteVoice, button),
-      );
+    panel.querySelectorAll<HTMLButtonElement>("[data-delete-voice]").forEach((button) => {
+      button.addEventListener("click", () => {
+        void deleteSavedVoice(button.dataset.deleteVoice || "", button);
+      });
     });
   }
 
-  async function loadSavedVoices() {
+  async function loadSavedVoices(): Promise<void> {
     try {
-      const data = await api("/api/audio/saved-voices");
+      const data = await api<VoicesResponse>("/api/audio/saved-voices");
       savedVoices = data.voices || [];
-    } catch (_error) {
+    } catch {
       savedVoices = [];
     }
     renderSavedVoices();
   }
 
-  function renderResult() {
+  function renderResult(): void {
     if (!result) {
       download.classList.add("hidden");
       resultSubtitle.textContent = "No speech generated yet.";
@@ -263,7 +300,7 @@ export async function renderTTS(root, ctx) {
     `;
   }
 
-  function setRunning(value) {
+  function setRunning(value: boolean): void {
     running = value;
     generateButton.disabled = value || !models.length;
     generateButton.innerHTML = value
@@ -273,63 +310,65 @@ export async function renderTTS(root, ctx) {
     phaseWrap.classList.toggle("hidden", !value);
   }
 
-  async function loadModel() {
+  async function loadModel(): Promise<void> {
     if (!modelId) return;
-    const button = $("[data-load]");
+    const button = root.querySelector<HTMLElement>("[data-load]");
     setButtonBusy(button, true, "Loading…");
     try {
-      const data = await api("/api/audio/load", {
+      const data = await api<AudioStatusResponse>("/api/audio/load", {
         method: "POST",
         body: { model_id: modelId },
       });
       voices = data.voices || [];
       renderVoices();
-      setStatus(data.status, data.loaded);
-      ctx.refreshStatus?.();
+      setStatus(data.status || "", data.loaded);
+      void ctx.refreshStatus();
       toast("Audio model loaded.", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
   }
 
-  async function unloadModel() {
-    const button = $("[data-unload]");
+  async function unloadModel(): Promise<void> {
+    const button = root.querySelector<HTMLElement>("[data-unload]");
     setButtonBusy(button, true, "Stopping…");
     try {
-      const data = await api("/api/audio/unload", { method: "POST" });
+      const data = await api<AudioStatusResponse>("/api/audio/unload", { method: "POST" });
       voices = [];
       renderVoices();
-      setStatus(data.status, data.loaded);
-      ctx.refreshStatus?.();
+      setStatus(data.status || "", data.loaded);
+      void ctx.refreshStatus();
       toast("audio.cpp server stopped.", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
   }
 
-  async function refreshVoices() {
+  async function refreshVoices(): Promise<void> {
     if (!modelId) return;
-    const button = $("[data-refresh-voices]");
+    const button = root.querySelector<HTMLElement>("[data-refresh-voices]");
     setButtonBusy(button, true, "Loading…");
     try {
-      const data = await api(`/api/audio/voices?model_id=${encodeURIComponent(modelId)}`);
+      const data = await api<VoicesResponse>(
+        `/api/audio/voices?model_id=${encodeURIComponent(modelId)}`,
+      );
       voices = data.voices || [];
       renderVoices();
       setStatus("audio.cpp server running.", true);
-      ctx.refreshStatus?.();
+      void ctx.refreshStatus();
       toast(`Loaded ${voices.length} voice${voices.length === 1 ? "" : "s"}.`, "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
   }
 
-  async function uploadReference(file) {
+  async function uploadReference(file: File): Promise<void> {
     const stored = await uploadFile(file);
     reference = {
       id: stored.id,
@@ -340,8 +379,8 @@ export async function renderTTS(root, ctx) {
     toast("Reference clip ready.", "success");
   }
 
-  function trimReference(source, name) {
-    openAudioTrimmer({
+  function trimReference(source: File | Blob | string, name?: string): void {
+    void openAudioTrimmer({
       source,
       name: name || "reference",
       title: "Trim reference clip",
@@ -351,14 +390,20 @@ export async function renderTTS(root, ctx) {
     });
   }
 
-  async function saveVoice() {
-    if (!reference) return toast("Upload a reference clip first.", "warning");
+  async function saveVoice(): Promise<void> {
+    if (!reference) {
+      toast("Upload a reference clip first.", "warning");
+      return;
+    }
     const name = voiceName.trim();
-    if (!name) return toast("Give the voice a name first.", "warning");
-    const button = $("[data-save-voice]");
+    if (!name) {
+      toast("Give the voice a name first.", "warning");
+      return;
+    }
+    const button = root.querySelector<HTMLElement>("[data-save-voice]");
     setButtonBusy(button, true, "Saving…");
     try {
-      const data = await api("/api/audio/save-voice", {
+      const data = await api<AudioStatusResponse>("/api/audio/save-voice", {
         method: "POST",
         body: {
           model_id: modelId,
@@ -369,19 +414,19 @@ export async function renderTTS(root, ctx) {
       });
       voices = data.voices || [];
       renderVoices();
-      voiceInput.value = data.name;
+      voiceInput.value = data.name || "";
       voiceName = "";
       await loadSavedVoices();
       renderReferencePanel();
       toast(data.status, "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       setButtonBusy(button, false);
     }
   }
 
-  async function deleteSavedVoice(name, button) {
+  async function deleteSavedVoice(name: string, button: HTMLElement): Promise<void> {
     const okay = await confirmDialog(
       `Delete the saved voice “${name}”? Its reference clip and transcript entry will be removed.`,
       {
@@ -394,27 +439,28 @@ export async function renderTTS(root, ctx) {
 
     setButtonBusy(button, true, "Deleting…");
     try {
-      const data = await api("/api/audio/delete-voice", {
+      const data = await api<AudioStatusResponse>("/api/audio/delete-voice", {
         method: "POST",
         body: { name },
       });
       savedVoices = data.voices || savedVoices.filter((voice) => voice !== name);
       renderSavedVoices();
-      voices = voices.filter(
-        (voice) => voice !== name && voice !== data.name,
-      );
+      voices = voices.filter((voice) => voice !== name && voice !== data.name);
       renderVoices();
       toast(data.status, "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
       if (button.isConnected) setButtonBusy(button, false);
     }
   }
 
-  async function generate() {
+  async function generate(): Promise<void> {
     if (running || !modelId) return;
     const text = textInput.value.trim();
-    if (!text) return toast("Type the text to speak first.", "warning");
+    if (!text) {
+      toast("Type the text to speak first.", "warning");
+      return;
+    }
     setRunning(true);
     phaseLabel.textContent = "Starting audio.cpp…";
     result = null;
@@ -422,23 +468,27 @@ export async function renderTTS(root, ctx) {
     controller = new AbortController();
 
     try {
-      await stream(
+      await stream<TtsStreamEvent>(
         "/api/audio/generate",
         {
           model_id: modelId,
           text,
           voice: voiceInput.value || null,
           speed: Number(speedNumber.value) || 1,
-          seed: Number($("[data-seed]").value) || 0,
-          max_tokens: Number($("[data-max-tokens]").value) || 0,
+          seed: Number($<HTMLInputElement>("[data-seed]").value) || 0,
+          max_tokens: Number($<HTMLInputElement>("[data-max-tokens]").value) || 0,
           voice_ref: reference?.id || null,
           reference_text: referenceTranscript,
         },
         (event) => {
           if (event.type === "phase") {
-            phaseLabel.textContent = event.message;
+            phaseLabel.textContent = event.message || "";
           } else if (event.type === "result") {
-            result = { ...event, filename: "generated-speech.wav" };
+            result = {
+              ...event,
+              url: event.url || "",
+              filename: "generated-speech.wav",
+            };
             renderResult();
           } else if (event.type === "error") {
             toast(event.message, "error");
@@ -449,21 +499,21 @@ export async function renderTTS(root, ctx) {
         controller.signal,
       );
     } catch (error) {
-      if (error.name !== "AbortError") toast(error.message, "error");
+      if ((error as Error).name !== "AbortError") toast(errorText(error), "error");
     } finally {
       setRunning(false);
       controller = null;
-      ctx.refreshStatus?.();
+      void ctx.refreshStatus();
     }
   }
 
-  async function stop() {
+  async function stop(): Promise<void> {
     try {
       await api("/api/audio/cancel", { method: "POST" });
       controller?.abort();
       toast("Stopping speech generation…", "warning", 1800);
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     }
   }
 
@@ -473,11 +523,21 @@ export async function renderTTS(root, ctx) {
     voiceInput.value = "";
     renderVoices();
   });
-  $("[data-load]")?.addEventListener("click", loadModel);
-  $("[data-unload]")?.addEventListener("click", unloadModel);
-  $("[data-refresh-voices]")?.addEventListener("click", refreshVoices);
-  generateButton.addEventListener("click", generate);
-  stopButton.addEventListener("click", stop);
+  root.querySelector("[data-load]")?.addEventListener("click", () => {
+    void loadModel();
+  });
+  root.querySelector("[data-unload]")?.addEventListener("click", () => {
+    void unloadModel();
+  });
+  root.querySelector("[data-refresh-voices]")?.addEventListener("click", () => {
+    void refreshVoices();
+  });
+  generateButton.addEventListener("click", () => {
+    void generate();
+  });
+  stopButton.addEventListener("click", () => {
+    void stop();
+  });
 
   speedRange.addEventListener("input", () => {
     speedNumber.value = speedRange.value;
@@ -489,8 +549,8 @@ export async function renderTTS(root, ctx) {
     speedLabel.textContent = `${value.toFixed(2)}×`;
   });
 
-  function renderReferencePanel() {
-    const panel = $("[data-ref-panel]");
+  function renderReferencePanel(): void {
+    const panel = root.querySelector<HTMLElement>("[data-ref-panel]");
     if (!panel) return;
     panel.innerHTML = `
       <div class="flex flex-wrap items-center gap-2">
@@ -511,16 +571,19 @@ export async function renderTTS(root, ctx) {
       <p class="mt-2 text-[11px] leading-5 text-slate-500">A reference clip overrides the Voice field. Saved voices are shared with the Chat page.</p>
     `;
 
-    panel.querySelector("[data-ref-text]")?.addEventListener("input", (event) => {
-      referenceTranscript = event.target.value;
+    panel.querySelector<HTMLTextAreaElement>("[data-ref-text]")?.addEventListener("input", (event) => {
+      referenceTranscript = (event.target as HTMLTextAreaElement).value;
     });
-    panel.querySelector("[data-voice-name]")?.addEventListener("input", (event) => {
-      voiceName = event.target.value;
+    panel.querySelector<HTMLInputElement>("[data-voice-name]")?.addEventListener("input", (event) => {
+      voiceName = (event.target as HTMLInputElement).value;
     });
-    panel.querySelector("[data-save-voice]")?.addEventListener("click", saveVoice);
-    panel.querySelector("[data-ref-upload]")?.addEventListener("change", (event) => {
-      const file = event.target.files?.[0];
-      event.target.value = "";
+    panel.querySelector("[data-save-voice]")?.addEventListener("click", () => {
+      void saveVoice();
+    });
+    panel.querySelector<HTMLInputElement>("[data-ref-upload]")?.addEventListener("change", (event) => {
+      const input = event.target as HTMLInputElement;
+      const file = input.files?.[0];
+      input.value = "";
       if (!file) return;
       trimReference(file, file.name);
     });
@@ -536,7 +599,7 @@ export async function renderTTS(root, ctx) {
 
   renderReferencePanel();
   renderVoices();
-  loadSavedVoices();
+  void loadSavedVoices();
   renderResult();
   setRunning(false);
   setStatus(statusText, boot.audio_loaded);
@@ -544,7 +607,7 @@ export async function renderTTS(root, ctx) {
   return () => {
     if (running) {
       controller?.abort();
-      api("/api/audio/cancel", { method: "POST" }).catch(() => {});
+      void api("/api/audio/cancel", { method: "POST" }).catch(() => {});
     }
   };
 }

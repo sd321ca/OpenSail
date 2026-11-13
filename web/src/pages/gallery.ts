@@ -1,51 +1,75 @@
-import { api } from "../api.js";
+import { api, errorText } from "../api";
 import {
   confirmDialog,
   emptyState,
   escapeHtml,
   icon,
   openModal,
+  queryElement,
   spinner,
   toast,
-} from "../ui.js";
+} from "../ui";
+import type {
+  GalleryItem,
+  GalleryResponse,
+  ImageMetadataResponse,
+  ImageMetadataRow,
+  RenderContext,
+} from "../types";
 
-const PAGE_META = {
+export type GalleryKind = "images" | "audio" | "videos";
+
+interface PageMeta {
+  icon: string;
+  noun: string;
+  endpoint: string;
+  empty: string;
+}
+
+const PAGE_META: Record<GalleryKind, PageMeta> = {
   images: { icon: "image", noun: "image", endpoint: "/api/gallery/images", empty: "Generate an image in the Generate page or add one to the media folder, then press Refresh." },
   audio: { icon: "music", noun: "audio clip", endpoint: "/api/gallery/audio", empty: "Generate music or speech in ComfyUI or add audio to the media folder, then press Refresh." },
   videos: { icon: "film", noun: "video", endpoint: "/api/gallery/videos", empty: "Generate or upscale a video in ComfyUI or add one to the media folder, then press Refresh." },
 };
 
-function promptLabel(item) {
+interface MoveResult {
+  moved?: number;
+  deleted_history?: number;
+  deleted_local?: number;
+  failed?: number;
+}
+
+function promptLabel(item: GalleryItem): string {
   return (item.prompt || "").trim();
 }
 
-function sourceLabel(item, fallback) {
+function sourceLabel(item: GalleryItem, fallback: string): string {
   return item.type === "local" ? "From the media folder" : fallback;
 }
 
-function itemLabel(item) {
+function itemLabel(item: GalleryItem): string {
   return item.subfolder ? `${item.subfolder}/${item.filename}` : item.filename;
 }
 
-function itemKey(item) {
+function itemKey(item: GalleryItem): string {
   return [item.type || "", item.subfolder || "", item.filename, item.prompt_id || ""].join("\u0000");
 }
 
-function sourceBadge(item, className = "") {
+function sourceBadge(item: GalleryItem, className = ""): string {
   const local = item.type === "local";
   return `<span class="pointer-events-none inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white/85 backdrop-blur-sm ${className}">${icon(local ? "folder" : "cpu", "h-3 w-3")}${local ? "Media" : "ComfyUI"}</span>`;
 }
 
-function formatMetadataValue(value) {
+function formatMetadataValue(value: unknown): string {
   if (typeof value === "string") return value;
   try {
-    return JSON.stringify(value, null, 2);
-  } catch (_error) {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
     return String(value);
   }
 }
 
-function metadataDetails(label, value) {
+function metadataDetails(label: string, value: unknown): string {
   return `<details class="group mt-2 overflow-hidden rounded-xl border border-subtle bg-ink-950/60">
     <summary class="flex cursor-pointer list-none select-none items-center justify-between gap-2 px-3 py-2 text-[11px] font-medium text-slate-300">
       <span>${escapeHtml(label)}</span>
@@ -55,13 +79,16 @@ function metadataDetails(label, value) {
   </details>`;
 }
 
-function metadataPanel() {
+function metadataPanel(): string {
   return `<section class="rounded-2xl border border-subtle bg-raised p-4" data-image-metadata>
     <div class="flex items-center gap-2 text-xs text-slate-500">${spinner("h-4 w-4")} Reading ComfyUI metadata…</div>
   </section>`;
 }
 
-async function loadImageMetadata(item, container) {
+async function loadImageMetadata(
+  item: GalleryItem,
+  container: HTMLElement | null,
+): Promise<void> {
   if (!container) return;
   const params = new URLSearchParams({
     filename: item.filename || "",
@@ -69,21 +96,27 @@ async function loadImageMetadata(item, container) {
     type: item.type || "output",
   });
   try {
-    const data = await api(`/api/gallery/image-metadata?${params.toString()}`);
+    const data = await api<ImageMetadataResponse>(
+      `/api/gallery/image-metadata?${params.toString()}`,
+    );
     if (!container.isConnected) return;
 
     const metadata = data?.metadata || {};
     const rows = (Array.isArray(metadata.summary) ? metadata.summary : []).filter(
-      (row) => row && row.label && row.value !== undefined && row.value !== null && row.value !== "",
+      (row: ImageMetadataRow) =>
+        row && row.label && row.value !== undefined && row.value !== null && row.value !== "",
     );
-    const detailEntries = [
+    const detailEntries: Array<[string, unknown]> = [
       ["Prompt (API format)", metadata.prompt],
       ["Workflow (UI format)", metadata.workflow],
       ["Parameters", metadata.parameters],
       ["Comment", metadata.comment],
       ["Description", metadata.description],
       ["Title", metadata.title],
-    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+    ];
+    const presentEntries = detailEntries.filter(
+      ([, value]) => value !== undefined && value !== null && value !== "",
+    );
     const summary = rows.length
       ? `<dl class="mt-3 space-y-3">${rows
           .map(
@@ -94,7 +127,7 @@ async function loadImageMetadata(item, container) {
           )
           .join("")}</dl>`
       : "";
-    const details = detailEntries
+    const details = presentEntries
       .map(([label, value]) => metadataDetails(label, value))
       .join("");
     const hasMetadata = Boolean(summary || details);
@@ -108,14 +141,18 @@ async function loadImageMetadata(item, container) {
     `;
   } catch (error) {
     if (!container.isConnected) return;
-    container.innerHTML = `<p class="text-xs leading-5 text-rose-300">Could not read metadata: ${escapeHtml(error.message)}</p>`;
+    container.innerHTML = `<p class="text-xs leading-5 text-rose-300">Could not read metadata: ${escapeHtml(errorText(error))}</p>`;
   }
 }
 
-export async function renderGallery(root, ctx, kind) {
+export async function renderGallery(
+  root: HTMLElement,
+  _ctx: RenderContext,
+  kind: GalleryKind,
+): Promise<() => void> {
   const meta = PAGE_META[kind];
-  let items = [];
-  const selected = new Set();
+  let items: GalleryItem[] = [];
+  const selected = new Set<string>();
   let loading = false;
 
   root.innerHTML = `
@@ -135,13 +172,13 @@ export async function renderGallery(root, ctx, kind) {
     </div>
   `;
 
-  const grid = root.querySelector("[data-grid]");
-  const count = root.querySelector("[data-count]");
-  const refreshButton = root.querySelector("[data-refresh]");
-  const deleteButton = root.querySelector("[data-delete-selected]");
-  const moveButton = root.querySelector("[data-move-selected]");
+  const grid = queryElement<HTMLElement>(root, "[data-grid]");
+  const count = queryElement<HTMLElement>(root, "[data-count]");
+  const refreshButton = queryElement<HTMLButtonElement>(root, "[data-refresh]");
+  const deleteButton = queryElement<HTMLButtonElement>(root, "[data-delete-selected]");
+  const moveButton = queryElement<HTMLButtonElement>(root, "[data-move-selected]");
 
-  function updateSelection() {
+  function updateSelection(): void {
     const chosen = items.filter((item) => selected.has(itemKey(item)));
     const total = chosen.length;
     const movable = chosen.filter(
@@ -155,14 +192,14 @@ export async function renderGallery(root, ctx, kind) {
     moveButton.innerHTML = `${icon("folder", "h-4 w-4")} Move to media${movable ? ` (${movable})` : ""}`;
   }
 
-  function selectionControl(index, item) {
+  function selectionControl(index: number, item: GalleryItem): string {
     return `<label class="absolute bottom-2 right-2 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-white/20 bg-black/55 backdrop-blur-sm transition hover:bg-black/75" title="Select ${escapeHtml(itemLabel(item))}">
       <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-white/40 bg-transparent accent-accent-500" data-select-item="${index}" ${selected.has(itemKey(item)) ? "checked" : ""} aria-label="Select ${escapeHtml(itemLabel(item))}" />
     </label>`;
   }
 
-  function wireSelection() {
-    grid.querySelectorAll("[data-select-item]").forEach((checkbox) => {
+  function wireSelection(): void {
+    grid.querySelectorAll<HTMLInputElement>("[data-select-item]").forEach((checkbox) => {
       checkbox.addEventListener("change", () => {
         const item = items[Number(checkbox.dataset.selectItem)];
         if (!item) return;
@@ -181,7 +218,7 @@ export async function renderGallery(root, ctx, kind) {
     });
   }
 
-  function skeleton() {
+  function skeleton(): string {
     if (kind === "audio") {
       return `<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         ${Array.from({ length: 8 })
@@ -196,7 +233,7 @@ export async function renderGallery(root, ctx, kind) {
     </div>`;
   }
 
-  function openLightbox(item) {
+  function openLightbox(item: GalleryItem): void {
     const prompt = promptLabel(item);
     const modal = openModal({
       title: itemLabel(item) || "Image",
@@ -213,11 +250,10 @@ export async function renderGallery(root, ctx, kind) {
         <a class="btn-secondary btn-xs" href="${escapeHtml(item.url)}" download>${icon("download", "h-4 w-4")} Download</a>
       </div>`,
     });
-    loadImageMetadata(item, modal.body.querySelector("[data-image-metadata]"));
-    return modal;
+    void loadImageMetadata(item, modal.body.querySelector("[data-image-metadata]"));
   }
 
-  function openVideo(item) {
+  function openVideo(item: GalleryItem): void {
     const prompt = promptLabel(item);
     openModal({
       title: itemLabel(item) || "Video",
@@ -233,7 +269,7 @@ export async function renderGallery(root, ctx, kind) {
     });
   }
 
-  function render() {
+  function render(): void {
     count.textContent = `${items.length} ${meta.noun}${items.length === 1 ? "" : "s"} in recent history and the media folder`;
     if (!items.length) {
       grid.innerHTML = `<div class="card">${emptyState(`No ${kind} yet`, meta.empty, meta.icon)}</div>`;
@@ -260,10 +296,13 @@ export async function renderGallery(root, ctx, kind) {
           )
           .join("")}
       </div>`;
-      grid.querySelectorAll("[data-image]").forEach((button) => {
-        button.addEventListener("click", () => openLightbox(items[Number(button.dataset.image)]));
+      grid.querySelectorAll<HTMLButtonElement>("[data-image]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = items[Number(button.dataset.image)];
+          if (item) openLightbox(item);
+        });
       });
-      grid.querySelectorAll("img[data-full-src]").forEach((image) => {
+      grid.querySelectorAll<HTMLImageElement>("img[data-full-src]").forEach((image) => {
         image.addEventListener("error", () => {
           const fallback = image.dataset.fullSrc;
           if (fallback && image.getAttribute("src") !== fallback) {
@@ -337,16 +376,19 @@ export async function renderGallery(root, ctx, kind) {
         )
         .join("")}
     </div>`;
-    grid.querySelectorAll("[data-video]").forEach((button) => {
-      button.addEventListener("click", () => openVideo(items[Number(button.dataset.video)]));
+    grid.querySelectorAll<HTMLButtonElement>("[data-video]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const item = items[Number(button.dataset.video)];
+        if (item) openVideo(item);
+      });
     });
-    grid.querySelectorAll("img[data-thumbnail]").forEach((image) => {
+    grid.querySelectorAll<HTMLImageElement>("img[data-thumbnail]").forEach((image) => {
       image.addEventListener("error", () => image.remove());
     });
     wireSelection();
   }
 
-  async function moveSelected() {
+  async function moveSelected(): Promise<void> {
     if (loading) return;
     const chosen = items.filter((item) => selected.has(itemKey(item)));
     const movable = chosen.filter(
@@ -370,7 +412,7 @@ export async function renderGallery(root, ctx, kind) {
     moveButton.disabled = true;
     moveButton.innerHTML = `${spinner("h-4 w-4")} Moving…`;
     try {
-      const result = await api("/api/gallery/move", {
+      const result = await api<MoveResult>("/api/gallery/move", {
         method: "POST",
         body: {
           items: movable.map((item) => ({
@@ -381,7 +423,7 @@ export async function renderGallery(root, ctx, kind) {
           })),
         },
       });
-      const parts = [];
+      const parts: string[] = [];
       if (result?.moved) {
         parts.push(`${result.moved} file${result.moved === 1 ? "" : "s"} moved`);
       }
@@ -398,14 +440,14 @@ export async function renderGallery(root, ctx, kind) {
       selected.clear();
       await load();
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       moveButton.disabled = loading || selected.size === 0;
       updateSelection();
     }
   }
 
-  async function deleteSelected() {
+  async function deleteSelected(): Promise<void> {
     if (loading || !selected.size) return;
     const chosen = items.filter((item) => selected.has(itemKey(item)));
     if (!chosen.length) {
@@ -436,7 +478,7 @@ export async function renderGallery(root, ctx, kind) {
     deleteButton.disabled = true;
     deleteButton.innerHTML = `${spinner("h-4 w-4")} Deleting…`;
     try {
-      const result = await api("/api/gallery/delete", {
+      const result = await api<MoveResult>("/api/gallery/delete", {
         method: "POST",
         body: {
           items: chosen.map((item) => ({
@@ -447,7 +489,7 @@ export async function renderGallery(root, ctx, kind) {
           })),
         },
       });
-      const parts = [];
+      const parts: string[] = [];
       if (result?.deleted_history) {
         parts.push(`${result.deleted_history} history ${result.deleted_history === 1 ? "entry" : "entries"}`);
       }
@@ -458,14 +500,14 @@ export async function renderGallery(root, ctx, kind) {
       selected.clear();
       await load();
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorText(error), "error");
     } finally {
       deleteButton.disabled = loading || selected.size === 0;
       updateSelection();
     }
   }
 
-  async function load() {
+  async function load(): Promise<void> {
     if (loading) return;
     loading = true;
     selected.clear();
@@ -474,18 +516,21 @@ export async function renderGallery(root, ctx, kind) {
     refreshButton.innerHTML = `${spinner("h-4 w-4")} Loading`;
     grid.innerHTML = skeleton();
     try {
-      const data = await api(`${meta.endpoint}?limit=300`);
+      const data = await api<GalleryResponse>(`${meta.endpoint}?limit=300`);
       items = data.items || [];
       render();
     } catch (error) {
+      const message = errorText(error);
       grid.innerHTML = `<div class="card p-6 text-center">
         <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-300">${icon("alert", "h-6 w-6")}</div>
         <p class="text-sm font-semibold text-slate-100">Could not load ${kind}</p>
-        <p class="mx-auto mt-2 max-w-lg whitespace-pre-wrap text-xs leading-5 text-slate-400">${escapeHtml(error.message)}</p>
+        <p class="mx-auto mt-2 max-w-lg whitespace-pre-wrap text-xs leading-5 text-slate-400">${escapeHtml(message)}</p>
         <button class="btn-secondary btn-xs mt-4" data-retry>Try again</button>
       </div>`;
-      grid.querySelector("[data-retry]")?.addEventListener("click", load);
-      toast(error.message, "error");
+      grid.querySelector("[data-retry]")?.addEventListener("click", () => {
+        void load();
+      });
+      toast(message, "error");
     } finally {
       loading = false;
       refreshButton.disabled = false;
@@ -494,9 +539,15 @@ export async function renderGallery(root, ctx, kind) {
     }
   }
 
-  refreshButton.addEventListener("click", load);
-  moveButton.addEventListener("click", moveSelected);
-  deleteButton.addEventListener("click", deleteSelected);
+  refreshButton.addEventListener("click", () => {
+    void load();
+  });
+  moveButton.addEventListener("click", () => {
+    void moveSelected();
+  });
+  deleteButton.addEventListener("click", () => {
+    void deleteSelected();
+  });
   await load();
 
   return () => {};

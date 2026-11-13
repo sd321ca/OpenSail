@@ -1,6 +1,8 @@
 /** Shared UI helpers: escaping, icons, Markdown, modals and toasts. */
 
-export function escapeHtml(value) {
+export type ToastType = "info" | "success" | "warning" | "error";
+
+export function escapeHtml(value: unknown): string {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -9,7 +11,7 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-const ICONS = {
+const ICONS: Record<string, string> = {
   generate: '<path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/>',
   chat: '<path d="M21 12a8.5 8.5 0 0 1-12.4 7.5L3 21l1.5-5.6A8.5 8.5 0 1 1 21 12Z"/><path d="M8 11h8M8 15h5"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/>',
@@ -49,12 +51,12 @@ const ICONS = {
   moon: '<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"/>',
 };
 
-export function icon(name, className = "h-5 w-5") {
+export function icon(name: string, className = "h-5 w-5"): string {
   const path = ICONS[name] || ICONS.info;
   return `<svg viewBox="0 0 24 24" class="${className}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }
 
-export function spinner(className = "h-4 w-4") {
+export function spinner(className = "h-4 w-4"): string {
   return `<svg class="${className} animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-opacity=".2" stroke-width="3"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`;
 }
 
@@ -62,9 +64,9 @@ export function spinner(className = "h-4 w-4") {
 /* Markdown (small, dependency-free subset)                            */
 /* ------------------------------------------------------------------ */
 
-function inlineMarkdown(text) {
+function inlineMarkdown(text: string): string {
   let value = escapeHtml(text);
-  const codes = [];
+  const codes: string[] = [];
   value = value.replace(/`([^`]+)`/g, (_match, code) => {
     const token = `\u0000INLINE${codes.length}\u0000`;
     codes.push(`<code>${code}</code>`);
@@ -75,30 +77,30 @@ function inlineMarkdown(text) {
   value = value.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
   value = value.replace(/(^|[\s(])_([^_\n]+)_/g, "$1<em>$2</em>");
   value = value.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  value = value.replace(/\u0000INLINE(\d+)\u0000/g, (_match, index) => codes[Number(index)]);
+  value = value.replace(/\u0000INLINE(\d+)\u0000/g, (_match, index: string) => codes[Number(index)] ?? "");
   return value;
 }
 
-export function renderMarkdown(source) {
+export function renderMarkdown(source: unknown): string {
   if (!source) return "";
-  const codeBlocks = [];
-  let text = String(source).replace(/```([\w+-]*)\r?\n?([\s\S]*?)```/g, (_match, _lang, code) => {
+  const codeBlocks: string[] = [];
+  const text = String(source).replace(/```([\w+-]*)\r?\n?([\s\S]*?)```/g, (_match, _lang, code: string) => {
     const token = `\u0000BLOCK${codeBlocks.length}\u0000`;
     codeBlocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
     return token;
   });
 
   const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const html = [];
-  let paragraph = [];
-  let listType = null;
+  const html: string[] = [];
+  let paragraph: string[] = [];
+  let listType: "ul" | "ol" | null = null;
 
-  const flushParagraph = () => {
+  const flushParagraph = (): void => {
     if (!paragraph.length) return;
     html.push(`<p>${inlineMarkdown(paragraph.join(" "))}</p>`);
     paragraph = [];
   };
-  const closeList = () => {
+  const closeList = (): void => {
     if (!listType) return;
     html.push(`</${listType}>`);
     listType = null;
@@ -116,7 +118,7 @@ export function renderMarkdown(source) {
     if (blockMatch) {
       flushParagraph();
       closeList();
-      html.push(codeBlocks[Number(blockMatch[1])]);
+      html.push(codeBlocks[Number(blockMatch[1])] ?? "");
       continue;
     }
 
@@ -147,7 +149,7 @@ export function renderMarkdown(source) {
     const listItem = line.match(/^\s*([-*+]|\d+\.)\s+(.*)$/);
     if (listItem) {
       flushParagraph();
-      const type = /\d+\./.test(listItem[1]) ? "ol" : "ul";
+      const type: "ul" | "ol" = /\d+\./.test(listItem[1]) ? "ol" : "ul";
       if (listType !== type) {
         closeList();
         listType = type;
@@ -166,7 +168,7 @@ export function renderMarkdown(source) {
   return html.join("");
 }
 
-export function plainText(value) {
+export function plainText(value: unknown): string {
   return escapeHtml(value || "").replace(/\n/g, "<br>");
 }
 
@@ -174,16 +176,25 @@ export function plainText(value) {
 /* Toasts and modals                                                   */
 /* ------------------------------------------------------------------ */
 
-export function toast(message, type = "info", timeout = 4800) {
+export function toast(
+  message: unknown,
+  type: ToastType = "info",
+  timeout = 4800,
+): void {
   const root = document.getElementById("toast-root");
   if (!root) return;
-  const styles = {
+  const styles: Record<ToastType, string> = {
     info: "border-sky-400/20 bg-sky-400/10 text-sky-100",
     success: "border-emerald-400/20 bg-emerald-400/10 text-emerald-100",
     warning: "border-amber-400/20 bg-amber-400/10 text-amber-100",
     error: "border-rose-400/20 bg-rose-400/10 text-rose-100",
   };
-  const iconNames = { info: "info", success: "check", warning: "alert", error: "alert" };
+  const iconNames: Record<ToastType, string> = {
+    info: "info",
+    success: "check",
+    warning: "alert",
+    error: "alert",
+  };
   const node = document.createElement("div");
   node.className = "toast";
   node.setAttribute("role", type === "error" ? "alert" : "status");
@@ -194,7 +205,7 @@ export function toast(message, type = "info", timeout = 4800) {
     <p class="min-w-0 flex-1 whitespace-pre-wrap break-words">${escapeHtml(message)}</p>
     <button class="icon-btn -mr-1 -mt-1 h-7 w-7" aria-label="Dismiss">${icon("close", "h-4 w-4")}</button>
   `;
-  const remove = () => {
+  const remove = (): void => {
     node.classList.add("opacity-0", "translate-y-1");
     node.style.transition = "opacity 160ms ease, transform 160ms ease";
     setTimeout(() => node.remove(), 180);
@@ -204,6 +215,22 @@ export function toast(message, type = "info", timeout = 4800) {
   if (timeout) setTimeout(remove, timeout);
 }
 
+export interface ModalOptions {
+  title?: string;
+  subtitle?: string;
+  content?: string | Node;
+  footer?: string | Node | null;
+  size?: "md" | "lg";
+  onClose?: (() => void) | null;
+}
+
+export interface ModalHandle {
+  close: () => void;
+  element: HTMLElement;
+  body: HTMLElement;
+  panel: HTMLElement;
+}
+
 export function openModal({
   title = "",
   subtitle = "",
@@ -211,7 +238,7 @@ export function openModal({
   footer = null,
   size = "md",
   onClose = null,
-} = {}) {
+}: ModalOptions = {}): ModalHandle {
   const root = document.getElementById("modal-root");
   const wrapper = document.createElement("div");
   wrapper.className = "modal-backdrop";
@@ -227,8 +254,9 @@ export function openModal({
       <div class="modal-body" data-modal-body></div>
     </div>
   `;
-  const panel = wrapper.querySelector(".modal-panel");
-  const body = wrapper.querySelector("[data-modal-body]");
+  const panel = wrapper.querySelector<HTMLElement>(".modal-panel");
+  const body = wrapper.querySelector<HTMLElement>("[data-modal-body]");
+  if (!panel || !body) throw new Error("Modal template is missing its panel.");
   if (content instanceof Node) body.appendChild(content);
   else body.innerHTML = content;
 
@@ -241,7 +269,7 @@ export function openModal({
   }
 
   let closed = false;
-  const close = () => {
+  const close = (): void => {
     if (closed) return;
     closed = true;
     document.removeEventListener("keydown", onKey);
@@ -249,7 +277,7 @@ export function openModal({
     wrapper.remove();
     onClose?.();
   };
-  const onKey = (event) => {
+  const onKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") close();
   };
 
@@ -259,15 +287,26 @@ export function openModal({
   });
   document.addEventListener("keydown", onKey);
   document.body.classList.add("overflow-hidden");
-  root.appendChild(wrapper);
+  root?.appendChild(wrapper);
   setTimeout(() => {
-    const focusTarget = wrapper.querySelector("input, textarea, select, button:not([data-modal-close])");
+    const focusTarget = wrapper.querySelector<HTMLElement>(
+      "input, textarea, select, button:not([data-modal-close])",
+    );
     focusTarget?.focus?.({ preventScroll: true });
   }, 30);
   return { close, element: wrapper, body, panel };
 }
 
-export function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confirm", danger = false } = {}) {
+export interface ConfirmOptions {
+  title?: string;
+  confirmLabel?: string;
+  danger?: boolean;
+}
+
+export function confirmDialog(
+  message: string,
+  { title = "Are you sure?", confirmLabel = "Confirm", danger = false }: ConfirmOptions = {},
+): Promise<boolean> {
   return new Promise((resolve) => {
     const footer = document.createElement("div");
     footer.className = "flex items-center justify-end gap-2";
@@ -284,12 +323,12 @@ export function confirmDialog(message, { title = "Are you sure?", confirmLabel =
         if (!settled) resolve(false);
       },
     });
-    footer.querySelector("[data-cancel]").addEventListener("click", () => {
+    footer.querySelector("[data-cancel]")?.addEventListener("click", () => {
       settled = true;
       modal.close();
       resolve(false);
     });
-    footer.querySelector("[data-confirm]").addEventListener("click", () => {
+    footer.querySelector("[data-confirm]")?.addEventListener("click", () => {
       settled = true;
       modal.close();
       resolve(true);
@@ -297,14 +336,18 @@ export function confirmDialog(message, { title = "Are you sure?", confirmLabel =
   });
 }
 
-export function setButtonBusy(button, busy, label = "Working…") {
+export function setButtonBusy(
+  button: HTMLElement | null | undefined,
+  busy: boolean,
+  label = "Working…",
+): void {
   if (!button) return;
   if (busy) {
     button.dataset.originalHtml = button.innerHTML;
-    button.disabled = true;
+    (button as HTMLButtonElement).disabled = true;
     button.innerHTML = `${spinner("h-4 w-4")}<span>${escapeHtml(label)}</span>`;
   } else {
-    button.disabled = false;
+    (button as HTMLButtonElement).disabled = false;
     if (button.dataset.originalHtml) {
       button.innerHTML = button.dataset.originalHtml;
       delete button.dataset.originalHtml;
@@ -312,19 +355,31 @@ export function setButtonBusy(button, busy, label = "Working…") {
   }
 }
 
-export function clamp(value, minimum, maximum) {
+export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-export function debounce(fn, wait = 250) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), wait);
-  };
+/**
+ * ``querySelector`` that throws when the element is missing.
+ *
+ * Page markup is generated by the page itself, so a missing node is a bug, not
+ * a state to handle. Returning a non-null type keeps the closures below honest
+ * without sprinkling assertions everywhere.
+ */
+export function queryElement<T extends Element>(
+  root: ParentNode,
+  selector: string,
+): T {
+  const element = root.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing element: ${selector}`);
+  return element;
 }
 
-export function emptyState(title, message, iconName = "info") {
+export function emptyState(
+  title: string,
+  message: string,
+  iconName = "info",
+): string {
   return `
     <div class="flex flex-col items-center justify-center gap-3 px-6 py-12 text-center">
       <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-subtle bg-raised text-slate-500">

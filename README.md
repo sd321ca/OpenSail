@@ -50,9 +50,10 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-The compiled Tailwind stylesheet is committed, so a normal install needs no
-Node.js. If you edit the frontend markup or classes, rebuild it with
-`npm install` followed by `npm run build:css`.
+The compiled Tailwind stylesheet and the bundled client (`web/assets/app.js`)
+are committed, so a normal install needs no Node.js. If you edit the frontend,
+run `npm install` once, then `npm run build` to rebuild both. See
+`AGENTS.md` for the TypeScript/Vite layout and the `npm run dev` workflow.
 
 ## Run
 

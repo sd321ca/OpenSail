@@ -7,30 +7,34 @@ import {
   setButtonBusy,
   spinner,
   toast,
-} from "./ui.js";
+} from "./ui";
+import { errorText } from "./api";
 
 const MIN_DURATION = 0.05;
 
-function formatTime(value) {
+/** A min/max sample pair, one per horizontal pixel of the waveform. */
+type Peak = [number, number];
+
+function formatTime(value: number): string {
   const seconds = Math.max(0, value);
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds - minutes * 60;
   return `${minutes}:${remainder.toFixed(1).padStart(4, "0")}`;
 }
 
-function trimmedName(name) {
+function trimmedName(name: unknown): string {
   const base = String(name || "audio").replace(/\.[^./\\]+$/, "") || "audio";
   return `${base}-trim.wav`;
 }
 
-function writeText(view, offset, text) {
+function writeText(view: DataView, offset: number, text: string): void {
   for (let index = 0; index < text.length; index += 1) {
     view.setUint8(offset + index, text.charCodeAt(index));
   }
 }
 
 /** Encode the selected part of a decoded buffer as 16-bit PCM WAV. */
-function encodeWav(buffer, startTime, endTime) {
+function encodeWav(buffer: AudioBuffer, startTime: number, endTime: number): Blob {
   const start = Math.max(0, Math.floor(startTime * buffer.sampleRate));
   const end = Math.min(buffer.length, Math.ceil(endTime * buffer.sampleRate));
   const frames = Math.max(1, end - start);
@@ -55,7 +59,7 @@ function encodeWav(buffer, startTime, endTime) {
   writeText(view, 36, "data");
   view.setUint32(40, dataSize, true);
 
-  const channelData = [];
+  const channelData: Float32Array[] = [];
   for (let channel = 0; channel < channels; channel += 1) {
     channelData.push(buffer.getChannelData(channel));
   }
@@ -78,15 +82,15 @@ function encodeWav(buffer, startTime, endTime) {
   return new Blob([data], { type: "audio/wav" });
 }
 
-function waveformPeaks(buffer, width) {
+function waveformPeaks(buffer: AudioBuffer, width: number): Peak[] {
   const channelCount = Math.max(1, Math.min(2, buffer.numberOfChannels));
-  const channels = [];
+  const channels: Float32Array[] = [];
   for (let channel = 0; channel < channelCount; channel += 1) {
     channels.push(buffer.getChannelData(channel));
   }
   const samples = channels[0];
   const perPixel = Math.max(1, Math.floor(samples.length / width));
-  const peaks = [];
+  const peaks: Peak[] = [];
   for (let pixel = 0; pixel < width; pixel += 1) {
     const start = pixel * perPixel;
     const end = Math.min(samples.length, start + perPixel);
@@ -104,7 +108,12 @@ function waveformPeaks(buffer, width) {
   return peaks;
 }
 
-function drawWaveform(canvas, peaks, startRatio, endRatio) {
+function drawWaveform(
+  canvas: HTMLCanvasElement,
+  peaks: Peak[],
+  startRatio: number,
+  endRatio: number,
+): void {
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(1, Math.round(rect.width));
   const height = Math.max(1, Math.round(rect.height));
@@ -113,16 +122,17 @@ function drawWaveform(canvas, peaks, startRatio, endRatio) {
   canvas.height = Math.round(height * devicePixelRatio);
 
   const context = canvas.getContext("2d");
+  if (!context) return;
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   context.clearRect(0, 0, width, height);
   const middle = height / 2;
   const scale = Math.max(1, height / 2 - 2);
 
-  const drawRange = (from, to, color) => {
+  const drawRange = (from: number, to: number, color: string): void => {
     context.strokeStyle = color;
     context.beginPath();
     for (let pixel = Math.max(0, from); pixel < to; pixel += 1) {
-      const [minimum, maximum] = peaks[pixel] || [0, 0];
+      const [minimum, maximum] = peaks[pixel] ?? [0, 0];
       context.moveTo(pixel + 0.5, middle + minimum * scale);
       context.lineTo(pixel + 0.5, middle + maximum * scale);
     }
@@ -143,6 +153,16 @@ function drawWaveform(canvas, peaks, startRatio, endRatio) {
   context.stroke();
 }
 
+export interface AudioTrimmerOptions {
+  /** A file/blob to decode, or an already-uploaded media URL. */
+  source: File | Blob | string;
+  name?: string;
+  title?: string;
+  subtitle?: string;
+  /** Receives the original file, or a WAV file for the selected range. */
+  onApply?: (file: File) => void | Promise<void>;
+}
+
 /**
  * Open a dialog for trimming uploaded or already uploaded audio.
  *
@@ -155,28 +175,28 @@ export async function openAudioTrimmer({
   title = "Trim audio",
   subtitle = "Choose the part of the clip to keep before uploading.",
   onApply,
-}) {
+}: AudioTrimmerOptions): Promise<void> {
   const isBlob = source instanceof Blob;
   const previewUrl = isBlob ? URL.createObjectURL(source) : source;
   let revokePreview = isBlob;
 
-  let buffer = null;
-  let fallbackFile = null;
+  let buffer: AudioBuffer | null = null;
+  let fallbackFile: File | null = null;
   let duration = 0;
-  let startRange = null;
-  let endRange = null;
-  let startLabel = null;
-  let endLabel = null;
-  let shadeLeft = null;
-  let shadeRight = null;
-  let selection = null;
-  let canvas = null;
-  let peaks = null;
+  let startRange: HTMLInputElement | null = null;
+  let endRange: HTMLInputElement | null = null;
+  let startLabel: HTMLElement | null = null;
+  let endLabel: HTMLElement | null = null;
+  let shadeLeft: HTMLElement | null = null;
+  let shadeRight: HTMLElement | null = null;
+  let selection: HTMLElement | null = null;
+  let canvas: HTMLCanvasElement | null = null;
+  let peaks: { width: number; values: Peak[] } | null = null;
   let start = 0;
   let end = 0;
-  let preview = null;
+  let preview: HTMLAudioElement | null = null;
   let playSelection = false;
-  let onResize = null;
+  let onResize: (() => void) | null = null;
   let closed = false;
 
   const modal = openModal({
@@ -201,7 +221,7 @@ export async function openAudioTrimmer({
     },
   });
 
-  const applyButton = modal.element.querySelector("[data-audio-apply]");
+  const applyButton = modal.element.querySelector<HTMLButtonElement>("[data-audio-apply]");
   modal.element
     .querySelector("[data-audio-cancel]")
     ?.addEventListener("click", () => modal.close());
@@ -210,7 +230,7 @@ export async function openAudioTrimmer({
     if (!onApply) return;
     setButtonBusy(applyButton, true, "Applying…");
     try {
-      let file = null;
+      let file: File | null = null;
       if (!buffer) {
         file = fallbackFile;
       } else {
@@ -239,12 +259,12 @@ export async function openAudioTrimmer({
       await onApply(file);
       modal.close();
     } catch (error) {
-      toast(error?.message || "Could not use the trimmed audio.", "error");
+      toast(errorText(error) || "Could not use the trimmed audio.", "error");
       setButtonBusy(applyButton, false);
     }
   });
 
-  const setFallback = (file, message) => {
+  const setFallback = (file: File | null, message: string): void => {
     fallbackFile = file;
     modal.body.innerHTML = `
       <div class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm leading-6 text-rose-200">
@@ -292,7 +312,7 @@ export async function openAudioTrimmer({
       : null;
     setFallback(
       fallbackFile,
-      error?.message || "The browser could not read this file.",
+      errorText(error) || "The browser could not read this file.",
     );
     return;
   }
@@ -330,30 +350,33 @@ export async function openAudioTrimmer({
     </div>
   `;
 
-  preview = modal.body.querySelector("[data-audio-preview]");
-  canvas = modal.body.querySelector("[data-audio-waveform]");
-  startRange = modal.body.querySelector("[data-start]");
-  endRange = modal.body.querySelector("[data-end]");
-  startLabel = modal.body.querySelector("[data-start-label]");
-  endLabel = modal.body.querySelector("[data-end-label]");
-  shadeLeft = modal.body.querySelector("[data-shade-left]");
-  shadeRight = modal.body.querySelector("[data-shade-right]");
-  selection = modal.body.querySelector("[data-audio-selection]");
-  const lengthLabel = modal.body.querySelector("[data-selection-length]");
+  const decoded = buffer;
+  if (!decoded) return;
+
+  preview = modal.body.querySelector<HTMLAudioElement>("[data-audio-preview]");
+  canvas = modal.body.querySelector<HTMLCanvasElement>("[data-audio-waveform]");
+  startRange = modal.body.querySelector<HTMLInputElement>("[data-start]");
+  endRange = modal.body.querySelector<HTMLInputElement>("[data-end]");
+  startLabel = modal.body.querySelector<HTMLElement>("[data-start-label]");
+  endLabel = modal.body.querySelector<HTMLElement>("[data-end-label]");
+  shadeLeft = modal.body.querySelector<HTMLElement>("[data-shade-left]");
+  shadeRight = modal.body.querySelector<HTMLElement>("[data-shade-right]");
+  selection = modal.body.querySelector<HTMLElement>("[data-audio-selection]");
+  const lengthLabel = modal.body.querySelector<HTMLElement>("[data-selection-length]");
 
   const minimumGap = Math.min(MIN_DURATION, duration);
-  startRange.max = String(Math.max(0, duration - minimumGap));
-  endRange.max = String(duration);
-  startRange.value = "0";
-  endRange.value = String(duration);
+  if (startRange) startRange.max = String(Math.max(0, duration - minimumGap));
+  if (endRange) endRange.max = String(duration);
+  if (startRange) startRange.value = "0";
+  if (endRange) endRange.value = String(duration);
   start = 0;
   end = duration;
 
-  const renderWaveform = () => {
+  const renderWaveform = (): void => {
     if (!canvas) return;
     const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width));
     if (!peaks || peaks.width !== width) {
-      peaks = { width, values: waveformPeaks(buffer, width) };
+      peaks = { width, values: waveformPeaks(decoded, width) };
     }
     drawWaveform(
       canvas,
@@ -363,7 +386,7 @@ export async function openAudioTrimmer({
     );
   };
 
-  const updateSelection = () => {
+  const updateSelection = (): void => {
     const left = duration ? (start / duration) * 100 : 0;
     const right = duration ? (end / duration) * 100 : 100;
     if (shadeLeft) shadeLeft.style.width = `${left}%`;
@@ -380,7 +403,8 @@ export async function openAudioTrimmer({
     renderWaveform();
   };
 
-  startRange.addEventListener("input", () => {
+  startRange?.addEventListener("input", () => {
+    if (!startRange) return;
     start = Math.max(
       0,
       Math.min(Number(startRange.value), end - minimumGap),
@@ -388,7 +412,8 @@ export async function openAudioTrimmer({
     startRange.value = String(start);
     updateSelection();
   });
-  endRange.addEventListener("input", () => {
+  endRange?.addEventListener("input", () => {
+    if (!endRange) return;
     end = Math.min(duration, Math.max(Number(endRange.value), start + minimumGap));
     endRange.value = String(end);
     updateSelection();
@@ -397,8 +422,8 @@ export async function openAudioTrimmer({
   modal.body.querySelector("[data-reset-selection]")?.addEventListener("click", () => {
     start = 0;
     end = duration;
-    startRange.value = "0";
-    endRange.value = String(duration);
+    if (startRange) startRange.value = "0";
+    if (endRange) endRange.value = String(duration);
     updateSelection();
   });
 
@@ -410,11 +435,11 @@ export async function openAudioTrimmer({
       await preview.play();
     } catch (error) {
       playSelection = false;
-      toast(error?.message || "Could not play the clip.", "error");
+      toast(errorText(error) || "Could not play the clip.", "error");
     }
   });
   preview?.addEventListener("timeupdate", () => {
-    if (!playSelection) return;
+    if (!preview || !playSelection) return;
     if (preview.currentTime >= end - 0.02) {
       playSelection = false;
       preview.pause();
@@ -428,8 +453,10 @@ export async function openAudioTrimmer({
     playSelection = false;
   });
 
-  applyButton.innerHTML = `${icon("check", "h-4 w-4")} Apply trim`;
-  applyButton.disabled = false;
+  if (applyButton) {
+    applyButton.innerHTML = `${icon("check", "h-4 w-4")} Apply trim`;
+    applyButton.disabled = false;
+  }
 
   updateSelection();
   onResize = () => {
