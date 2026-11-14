@@ -12,6 +12,7 @@ is optional, so you can use any one of them on its own or all together.
 ## Requirements
 
 - Python 3.10 or newer (the code uses `X | None` type hints)
+- Node.js 20.19 or newer (to build the dashboard client and stylesheet)
 - Optional: a running ComfyUI instance (default: http://127.0.0.1:8188) for the
   **Generate** page and gallery pages
 - Optional: a `llama-server` executable from
@@ -50,10 +51,16 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-The compiled Tailwind stylesheet and the bundled client (`web/assets/app.js`)
-are committed, so a normal install needs no Node.js. If you edit the frontend,
-run `npm install` once, then `npm run build` to rebuild both. See
-`AGENTS.md` for the TypeScript/Vite layout and the `npm run dev` workflow.
+The dashboard client and stylesheet are generated at build time and are not
+committed, so install the frontend dependencies and build them once (and again
+after editing anything in `web/src/` or `web/assets/input.css`):
+
+```bash
+npm install
+npm run build
+```
+
+See `AGENTS.md` for the TypeScript/Vite layout and the `npm run dev` workflow.
 
 ## Run
 

@@ -10,7 +10,7 @@ The Generate page's input controls are defined declaratively in `configs/fields.
 
 Applies to: `web/**`, `tailwind.config.js`, `package.json`, `vite.config.mts`, `tsconfig.json`.
 
-The dashboard client is TypeScript built with Vite. Sources live in `web/src/` (`app.ts` is the shell, `pages/*.ts` the page renderers, `api.ts`/`ui.ts`/`audio.ts` the shared helpers, `types.ts` the payload interfaces). Vite bundles them to the committed `web/assets/app.js`, which `web/index.html` loads from its stable `/assets/app.js` URL; `comfyui_ui/server.py` serves that directory unchanged, so the build output—not the sources—is what the browser runs.
+The dashboard client is TypeScript built with Vite. Sources live in `web/src/` (`app.ts` is the shell, `pages/*.ts` the page renderers, `api.ts`/`ui.ts`/`audio.ts` the shared helpers, `types.ts` the payload interfaces). Vite bundles them to `web/assets/app.js`, which `web/index.html` loads from its stable `/assets/app.js` URL; `comfyui_ui/server.py` serves that directory unchanged, so the build output—not the sources—is what the browser runs. The build output is generated locally and git-ignored, so run `npm install` once and then build before starting the app.
 
 Two commands, both of which must run after a client change:
 
@@ -19,7 +19,7 @@ Two commands, both of which must run after a client change:
 
 `npm run dev` runs the Vite dev server on :5173 with HMR, proxying `/api`, `/free`, `/history` and `/favicon.ico` to the FastAPI app on :7860; run `python app.py` alongside it. A dev-only plugin rewrites the `index.html` script tag to `/src/app.ts`, so `web/index.html` keeps pointing at the built bundle.
 
-Tailwind scans `web/index.html`, `web/assets/pages/*.html` and `web/src/**/*.ts` (see `tailwind.config.js`) and writes the committed `web/assets/styles.css` (`npm run build:css`). Both generated artefacts—`web/assets/app.js` and `web/assets/styles.css`—are committed so a normal install needs only Python; `node_modules/` is not committed, and source maps are git-ignored because `npm run build:js` regenerates them.
+Tailwind scans `web/index.html`, `web/assets/pages/*.html` and `web/src/**/*.ts` (see `tailwind.config.js`) and writes `web/assets/styles.css` (`npm run build:css`). Both generated artefacts—`web/assets/app.js` and `web/assets/styles.css`—are git-ignored so client changes produce small diffs; `node_modules/` is not committed, and source maps are git-ignored because `npm run build:js` regenerates them.
 
 The palette is driven by CSS variables in `web/assets/input.css`: `:root` holds the dark theme and `html.light` the light theme. Prefer the `ink-*` / `slate-*` utilities so both themes follow automatically; add explicit `html.light` overrides when introducing a fixed colour or white-alpha surface. For repeated surfaces and separators use the semantic `bg-raised`, `border-subtle`, and `border-strong` utilities; their dark/light values live in `--surface-raised` and `--line-*`, so contrast changes happen in one place.
 
