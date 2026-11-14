@@ -3,6 +3,7 @@ import {
   confirmDialog,
   emptyState,
   escapeHtml,
+  formatTimestamp,
   icon,
   openModal,
   queryElement,
@@ -53,6 +54,12 @@ function itemLabel(item: GalleryItem): string {
 
 function itemKey(item: GalleryItem): string {
   return [item.type || "", item.subfolder || "", item.filename, item.prompt_id || ""].join("\u0000");
+}
+
+function dateLine(item: GalleryItem, className = "mt-1.5 px-1"): string {
+  const label = formatTimestamp(item.created_at);
+  if (!label) return "";
+  return `<p class="flex items-center gap-1 text-[11px] text-slate-500 ${className}">${icon("clock", "h-3 w-3")}<span class="truncate">${label}</span></p>`;
 }
 
 function sourceBadge(item: GalleryItem, className = ""): string {
@@ -281,16 +288,19 @@ export async function renderGallery(
         ${items
           .map(
             (item, index) => `
-            <div class="relative rounded-2xl transition" data-selectable>
-              <button class="gallery-tile group block aspect-square w-full text-left" data-image="${index}" title="${escapeHtml(itemLabel(item))}">
-                <img src="${escapeHtml(item.thumbnail_url || item.url)}" data-full-src="${escapeHtml(item.url)}" alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-                <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
-                  <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
-                  ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
-                </span>
-              </button>
-              ${sourceBadge(item, "absolute left-2 top-2 z-10")}
-              ${selectionControl(index, item)}
+            <div class="rounded-2xl transition" data-selectable>
+              <div class="relative">
+                <button class="gallery-tile group block aspect-square w-full text-left" data-image="${index}" title="${escapeHtml(itemLabel(item))}">
+                  <img src="${escapeHtml(item.thumbnail_url || item.url)}" data-full-src="${escapeHtml(item.url)}" alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+                  <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
+                    <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
+                    ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
+                  </span>
+                </button>
+                ${sourceBadge(item, "absolute left-2 top-2 z-10")}
+                ${selectionControl(index, item)}
+              </div>
+              ${dateLine(item)}
             </div>
           `,
           )
@@ -338,6 +348,7 @@ export async function renderGallery(
                   <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-white/30 bg-transparent accent-accent-500" data-select-item="${index}" ${selected.has(itemKey(item)) ? "checked" : ""} aria-label="Select ${escapeHtml(itemLabel(item))}" />
                 </label>
               </div>
+              ${dateLine(item, "mt-2")}
             </div>
           `,
           )
@@ -351,26 +362,29 @@ export async function renderGallery(
       ${items
         .map(
           (item, index) => `
-          <div class="relative rounded-2xl transition" data-selectable>
-            <button class="gallery-tile group block aspect-square w-full text-left" data-video="${index}" title="${escapeHtml(itemLabel(item))}">
-              <span class="absolute inset-0 flex items-center justify-center text-slate-600">${icon("film", "h-8 w-8")}</span>
-              ${
-                item.thumbnail_url
-                  ? `<img src="${escapeHtml(item.thumbnail_url)}" data-thumbnail alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />`
-                  : ""
-              }
-              <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
-                <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm">
-                  ${icon("play", "h-5 w-5")}
+          <div class="rounded-2xl transition" data-selectable>
+            <div class="relative">
+              <button class="gallery-tile group block aspect-square w-full text-left" data-video="${index}" title="${escapeHtml(itemLabel(item))}">
+                <span class="absolute inset-0 flex items-center justify-center text-slate-600">${icon("film", "h-8 w-8")}</span>
+                ${
+                  item.thumbnail_url
+                    ? `<img src="${escapeHtml(item.thumbnail_url)}" data-thumbnail alt="${escapeHtml(itemLabel(item))}" loading="lazy" class="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />`
+                    : ""
+                }
+                <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
+                  <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm">
+                    ${icon("play", "h-5 w-5")}
+                  </span>
                 </span>
-              </span>
-              <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
-                <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
-                ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
-              </span>
-            </button>
-            ${sourceBadge(item, "absolute left-2 top-2 z-10")}
-            ${selectionControl(index, item)}
+                <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-3 opacity-0 transition group-hover:opacity-100">
+                  <span class="block truncate text-[11px] font-medium text-white">${escapeHtml(itemLabel(item))}</span>
+                  ${promptLabel(item) ? `<span class="mt-0.5 line-clamp-2 text-[10px] leading-4 text-white/60">${escapeHtml(promptLabel(item))}</span>` : ""}
+                </span>
+              </button>
+              ${sourceBadge(item, "absolute left-2 top-2 z-10")}
+              ${selectionControl(index, item)}
+            </div>
+            ${dateLine(item)}
           </div>
         `,
         )

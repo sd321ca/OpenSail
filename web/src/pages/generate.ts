@@ -5,6 +5,7 @@ import {
   confirmDialog,
   emptyState,
   escapeHtml,
+  formatTimestamp,
   icon,
   openModal,
   plainText,
@@ -1123,6 +1124,14 @@ export async function renderGenerate(
     toast("Audio ready.", "success", 1600);
   }
 
+  function galleryCaption(filename: string, createdAt?: number): string {
+    const date = formatTimestamp(createdAt);
+    return `<div class="px-2.5 py-2">
+      <p class="truncate text-[11px] text-slate-400">${escapeHtml(filename)}</p>
+      ${date ? `<p class="mt-0.5 truncate text-[10px] text-slate-500">${date}</p>` : ""}
+    </div>`;
+  }
+
   async function openImageGallery(index: number): Promise<void> {
     const modal = openModal({
       title: "Choose an image",
@@ -1150,7 +1159,7 @@ export async function renderGenerate(
               <div class="aspect-square overflow-hidden bg-ink-950">
                 <img src="${escapeHtml(item.thumbnail_url || item.url)}" data-full-src="${escapeHtml(item.url)}" alt="${escapeHtml(item.filename)}" loading="lazy" class="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
               </div>
-              <p class="truncate px-2.5 py-2 text-[11px] text-slate-400">${escapeHtml(item.filename)}</p>
+              ${galleryCaption(item.filename, item.created_at)}
             </button>
           `,
           )
@@ -1221,7 +1230,7 @@ export async function renderGenerate(
                   </span>
                 </span>
               </div>
-              <p class="truncate px-2.5 py-2 text-[11px] text-slate-400">${escapeHtml(item.filename)}</p>
+              ${galleryCaption(item.filename, item.created_at)}
             </button>
           `,
           )
@@ -1277,6 +1286,7 @@ export async function renderGenerate(
                 <div class="min-w-0">
                   <p class="truncate text-xs font-semibold text-slate-200">${escapeHtml(item.filename)}</p>
                   ${item.prompt ? `<p class="truncate text-[11px] text-slate-500">${escapeHtml(item.prompt)}</p>` : ""}
+                  ${item.created_at ? `<p class="truncate text-[10px] text-slate-500">${formatTimestamp(item.created_at)}</p>` : ""}
                 </div>
               </div>
               <audio class="mb-2 w-full" controls preload="none" src="${escapeHtml(item.url)}"></audio>

@@ -99,6 +99,8 @@ export interface GalleryItem {
   prompt?: string;
   url: string;
   thumbnail_url?: string;
+  /** Creation time in epoch milliseconds, when it can be determined. */
+  created_at?: number;
 }
 
 /** Response of ``GET /api/gallery/{images,audio,videos}``. */

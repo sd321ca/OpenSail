@@ -108,11 +108,12 @@ def local_thumbnail_url(filename: str, subfolder: str = "") -> str:
 
 def _list_local_media(
     extensions: tuple[str, ...], limit: int | None = None
-) -> list[tuple[str, str]]:
-    """Return ``(filename, subfolder)`` pairs from the local media folder.
+) -> list[tuple[str, str, float]]:
+    """Return ``(filename, subfolder, modified)`` triples from the media folder.
 
-    Entries are sorted newest-first by modification time. Hidden files and
-    folders are skipped, and subfolders are scanned recursively.
+    ``modified`` is the file's modification time as a POSIX timestamp. Entries
+    are sorted newest-first. Hidden files and folders are skipped, and
+    subfolders are scanned recursively.
     """
     if not os.path.isdir(LOCAL_MEDIA_DIR):
         return []
@@ -138,12 +139,15 @@ def _list_local_media(
             found.append((modified, name, subfolder))
 
     found.sort(key=lambda entry: entry[0], reverse=True)
-    items = [(name, subfolder) for _modified, name, subfolder in found]
+    items = [(name, subfolder, modified) for modified, name, subfolder in found]
     return items[:limit] if limit is not None else items
 
 
 def _local_media_ref(
-    filename: str, subfolder: str, thumbnail: bool = False
+    filename: str,
+    subfolder: str,
+    thumbnail: bool = False,
+    created_at: float | None = None,
 ) -> dict:
     """Build a gallery entry for a file in the local media folder."""
     ref = {
@@ -156,6 +160,8 @@ def _local_media_ref(
     ref["url"] = file_proxy_url(ref)
     if thumbnail:
         ref["thumbnail_url"] = local_thumbnail_url(filename, subfolder)
+    if created_at:
+        ref["created_at"] = int(created_at * 1000)
     return ref
 
 
@@ -675,6 +681,43 @@ def _prompt_text(entry: dict) -> str:
     return ""
 
 
+def _history_created_at(entry: dict) -> int:
+    """Return when a history entry was created, in epoch milliseconds.
+
+    Modern ComfyUI stores the enqueue time in the prompt's ``create_time``
+    field. Older servers only expose execution timestamps in the status
+    messages, so fall back to those. Returns 0 when neither is available.
+    """
+    prompt_meta = entry.get("prompt")
+    if (
+        isinstance(prompt_meta, list)
+        and len(prompt_meta) > 3
+        and isinstance(prompt_meta[3], dict)
+    ):
+        value = prompt_meta[3].get("create_time")
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+
+    status = entry.get("status")
+    if isinstance(status, dict):
+        for message in status.get("messages") or []:
+            if not isinstance(message, list) or len(message) < 2:
+                continue
+            data = message[1]
+            if not isinstance(data, dict):
+                continue
+            value = data.get("timestamp")
+            if isinstance(value, (int, float)) and value > 0:
+                return int(value)
+    return 0
+
+
+def _sort_by_created_at(items: list) -> list:
+    """Sort gallery entries newest-first by their ``created_at`` timestamp."""
+    items.sort(key=lambda ref: ref.get("created_at") or 0, reverse=True)
+    return items
+
+
 def _load_history(client: ComfyUIClient) -> list[tuple[str, dict]]:
     try:
         return _sorted_history(client.get_history())
@@ -699,17 +742,20 @@ def _gallery_history(
 def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
     """Return recent images from ComfyUI's history and the local media folder.
 
-    Each entry is a dict with the image's filename, subfolder, type, proxy URL
-    and the prompt text (when available). Local media comes first, then newest
-    history images. ``limit`` caps how many files of each source are listed.
+    Each entry is a dict with the image's filename, subfolder, type, proxy URL,
+    creation time and prompt text (when available). Entries are sorted
+    newest-first. ``limit`` caps how many files of each source are listed.
     """
     images = [
-        _local_media_ref(filename, subfolder, thumbnail=True)
-        for filename, subfolder in _list_local_media(IMAGE_EXTENSIONS, limit)
+        _local_media_ref(filename, subfolder, thumbnail=True, created_at=modified)
+        for filename, subfolder, modified in _list_local_media(
+            IMAGE_EXTENSIONS, limit
+        )
     ]
     for prompt_id, entry in _gallery_history(client, bool(images))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
+        created_at = _history_created_at(entry)
 
         for node_output in outputs.values():
             for image_ref in node_output.get("images", []):
@@ -723,29 +769,33 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
                     "type": image_ref.get("type", "output"),
                     "prompt_id": prompt_id,
                     "prompt": prompt_text,
+                    "created_at": created_at,
                 }
                 ref["url"] = file_proxy_url(ref)
                 # Only images generated through OpenSail have a cached
                 # thumbnail; older ComfyUI history falls back to the full URL.
                 ref["thumbnail_url"] = thumbnail_url(ref["filename"])
                 images.append(ref)
-    return images
+    return _sort_by_created_at(images)
 
 
 def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
     """Return recent audio from ComfyUI's history and the local media folder.
 
-    Each entry is a dict with the audio's filename, subfolder, type, proxy URL
-    and the prompt text (when available). Local media comes first, then newest
-    history audio. ``limit`` caps how many files of each source are listed.
+    Each entry is a dict with the audio's filename, subfolder, type, proxy URL,
+    creation time and prompt text (when available). Entries are sorted
+    newest-first. ``limit`` caps how many files of each source are listed.
     """
     audio = [
-        _local_media_ref(filename, subfolder)
-        for filename, subfolder in _list_local_media(AUDIO_EXTENSIONS, limit)
+        _local_media_ref(filename, subfolder, created_at=modified)
+        for filename, subfolder, modified in _list_local_media(
+            AUDIO_EXTENSIONS, limit
+        )
     ]
     for prompt_id, entry in _gallery_history(client, bool(audio))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
+        created_at = _history_created_at(entry)
 
         for node_output in outputs.values():
             for audio_ref in node_output.get("audio", []):
@@ -755,10 +805,11 @@ def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
                     "type": audio_ref.get("type", "output"),
                     "prompt_id": prompt_id,
                     "prompt": prompt_text,
+                    "created_at": created_at,
                 }
                 ref["url"] = file_proxy_url(ref)
                 audio.append(ref)
-    return audio
+    return _sort_by_created_at(audio)
 
 
 def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
@@ -766,16 +817,20 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
 
     ComfyUI's SaveVideo node reports its result under the "images" output key
     (with an "animated" flag), so history video files are picked out of that key
-    by their file extension. Local media comes first, then newest history
-    videos. ``limit`` caps how many files of each source are listed.
+    by their file extension. Each entry includes its creation time; the list is
+    sorted newest-first. ``limit`` caps how many files of each source are
+    listed.
     """
     videos = [
-        _local_media_ref(filename, subfolder, thumbnail=True)
-        for filename, subfolder in _list_local_media(VIDEO_EXTENSIONS, limit)
+        _local_media_ref(filename, subfolder, thumbnail=True, created_at=modified)
+        for filename, subfolder, modified in _list_local_media(
+            VIDEO_EXTENSIONS, limit
+        )
     ]
     for prompt_id, entry in _gallery_history(client, bool(videos))[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
+        created_at = _history_created_at(entry)
 
         for node_output in outputs.values():
             for video_ref in node_output.get("images", []):
@@ -787,8 +842,9 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
                     "type": video_ref.get("type", "output"),
                     "prompt_id": prompt_id,
                     "prompt": prompt_text,
+                    "created_at": created_at,
                 }
                 ref["url"] = file_proxy_url(ref)
                 ref["thumbnail_url"] = thumbnail_url(ref["filename"])
                 videos.append(ref)
-    return videos
+    return _sort_by_created_at(videos)
