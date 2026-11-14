@@ -344,15 +344,15 @@ var e=class extends Error{status;constructor(e,t=0){super(e),this.name=`ApiError
               <p class="truncate px-2.5 py-2 text-[11px] text-slate-400">${o(e.filename)}</p>
             </button>
           `).join(``)}
-      </div>`,n.body.querySelectorAll(`[data-gallery-item]`).forEach(r=>{r.addEventListener(`click`,()=>{let i=t.items[Number(r.dataset.galleryItem)];w.images[e]={gallery:i,previewUrl:i.url,name:i.filename},n.close(),Y(),p(`Gallery image selected.`,`success`,1600)})}),n.body.querySelectorAll(`img[data-full-src]`).forEach(e=>{e.addEventListener(`error`,()=>{let t=e.dataset.fullSrc;t&&e.getAttribute(`src`)!==t?e.src=t:e.hidden=!0})})}catch(e){n.body.innerHTML=`<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${o(t(e))}</p>`}}async function Ce(){let e=m({title:`Choose a video`,subtitle:`Reuse a recent video from ComfyUI or the media folder.`,size:`lg`,content:`<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">${Array.from({length:6}).map(()=>`<div class="skeleton aspect-video"></div>`).join(``)}</div>`});try{let t=await r(`/api/gallery/videos?limit=60`);if(!t.items.length){e.body.innerHTML=y(`No videos yet`,`Generate or upscale a video first, add one to the media folder, or upload one above.`,`film`);return}e.body.innerHTML=`<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      </div>`,n.body.querySelectorAll(`[data-gallery-item]`).forEach(r=>{r.addEventListener(`click`,()=>{let i=t.items[Number(r.dataset.galleryItem)];w.images[e]={gallery:i,previewUrl:i.url,name:i.filename},n.close(),Y(),p(`Gallery image selected.`,`success`,1600)})}),n.body.querySelectorAll(`img[data-full-src]`).forEach(e=>{e.addEventListener(`error`,()=>{let t=e.dataset.fullSrc;t&&e.getAttribute(`src`)!==t?e.src=t:e.hidden=!0})})}catch(e){n.body.innerHTML=`<p class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">${o(t(e))}</p>`}}async function Ce(){let e=m({title:`Choose a video`,subtitle:`Reuse a recent video from ComfyUI or the media folder.`,size:`lg`,content:`<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">${Array.from({length:8}).map(()=>`<div class="skeleton aspect-square"></div>`).join(``)}</div>`});try{let t=await r(`/api/gallery/videos?limit=60`);if(!t.items.length){e.body.innerHTML=y(`No videos yet`,`Generate or upscale a video first, add one to the media folder, or upload one above.`,`film`);return}e.body.innerHTML=`<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         ${t.items.map((e,t)=>`
             <button class="group overflow-hidden rounded-xl border border-subtle bg-raised text-left transition hover:border-accent-400/40 hover:bg-raised" data-video-item="${t}">
-              <div class="relative aspect-video overflow-hidden bg-ink-950">
+              <div class="relative aspect-square overflow-hidden bg-ink-950">
                 <span class="absolute inset-0 flex items-center justify-center text-slate-600">${c(`film`,`h-7 w-7`)}</span>
                 ${e.thumbnail_url?`<img src="${o(e.thumbnail_url)}" data-thumbnail alt="${o(e.filename)}" loading="lazy" class="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-105" />`:``}
-                <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10">
-                  <span class="flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white">
-                    ${c(`play`,`h-4 w-4`)}
+                <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
+                  <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white">
+                    ${c(`play`,`h-5 w-5`)}
                   </span>
                 </span>
               </div>

@@ -1189,8 +1189,8 @@ export async function renderGenerate(
       title: "Choose a video",
       subtitle: "Reuse a recent video from ComfyUI or the media folder.",
       size: "lg",
-      content: `<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">${Array.from({ length: 6 })
-        .map(() => '<div class="skeleton aspect-video"></div>')
+      content: `<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">${Array.from({ length: 8 })
+        .map(() => '<div class="skeleton aspect-square"></div>')
         .join("")}</div>`,
     });
     try {
@@ -1203,21 +1203,21 @@ export async function renderGenerate(
         );
         return;
       }
-      modal.body.innerHTML = `<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      modal.body.innerHTML = `<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         ${data.items
           .map(
             (item, itemIndex) => `
             <button class="group overflow-hidden rounded-xl border border-subtle bg-raised text-left transition hover:border-accent-400/40 hover:bg-raised" data-video-item="${itemIndex}">
-              <div class="relative aspect-video overflow-hidden bg-ink-950">
+              <div class="relative aspect-square overflow-hidden bg-ink-950">
                 <span class="absolute inset-0 flex items-center justify-center text-slate-600">${icon("film", "h-7 w-7")}</span>
                 ${
                   item.thumbnail_url
                     ? `<img src="${escapeHtml(item.thumbnail_url)}" data-thumbnail alt="${escapeHtml(item.filename)}" loading="lazy" class="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-105" />`
                     : ""
                 }
-                <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10">
-                  <span class="flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white">
-                    ${icon("play", "h-4 w-4")}
+                <span class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 transition group-hover:bg-black/25">
+                  <span class="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white">
+                    ${icon("play", "h-5 w-5")}
                   </span>
                 </span>
               </div>
