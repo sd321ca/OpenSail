@@ -52,6 +52,24 @@ export async function renderOther(root: HTMLElement): Promise<() => void> {
           <button type="button" class="btn-danger" data-clear>${icon("trash", "h-4 w-4")} Clear History</button>
         </div>
       </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div class="flex items-center gap-2.5">
+            <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/10 text-rose-300">${icon("folder", "h-4 w-4")}</span>
+            <div>
+              <h2 class="card-title">ComfyUI Generations</h2>
+              <p class="card-subtitle">Delete media files saved by ComfyUI</p>
+            </div>
+          </div>
+        </div>
+        <div class="space-y-4 p-4 sm:p-5">
+          <div class="rounded-xl border border-rose-400/20 bg-rose-400/10 p-3 text-xs leading-5 text-rose-200">
+            This permanently deletes every file in ComfyUI's <span class="font-mono">output</span>, <span class="font-mono">input</span> and <span class="font-mono">temp</span> folders, including generated media and uploaded inputs. The dashboard's <span class="font-mono">media/</span> folder and saved workflows are not touched. Gallery history entries may remain until you also clear the history.
+          </div>
+          <button type="button" class="btn-danger" data-clear-media>${icon("trash", "h-4 w-4")} Clear ComfyUI Generations</button>
+        </div>
+      </section>
     </div>
   `;
 
@@ -105,6 +123,23 @@ export async function renderOther(root: HTMLElement): Promise<() => void> {
         options: {
           title: "Clear history?",
           confirmLabel: "Clear History",
+          danger: true,
+        },
+      },
+    });
+  });
+
+  const clearMediaButton = root.querySelector<HTMLElement>("[data-clear-media]");
+  clearMediaButton?.addEventListener("click", () => {
+    void postAction(clearMediaButton, "/api/comfy/media/clear", {
+      busyLabel: "Deleting…",
+      successMessage: "ComfyUI media deleted.",
+      confirm: {
+        message:
+          "This permanently deletes every file in ComfyUI's output, input and temp folders, including generated media and uploaded inputs. The media/ folder and saved workflows are not touched.",
+        options: {
+          title: "Clear ComfyUI generations?",
+          confirmLabel: "Clear Generations",
           danger: true,
         },
       },

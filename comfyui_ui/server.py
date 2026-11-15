@@ -73,6 +73,7 @@ from .gallery import (
     IMAGE_EXTENSIONS,
     LOCAL_MEDIA_TYPE,
     cleanup_orphaned_thumbnails,
+    clear_comfy_media_dirs,
     delete_local_media,
     ensure_local_thumbnail,
     file_proxy_url,
@@ -764,6 +765,41 @@ def clear_history() -> dict:
                 }
             )
     return {"status": "History cleared."}
+
+
+@app.post("/api/comfy/media/clear")
+def clear_comfy_media() -> dict:
+    """Delete the contents of ComfyUI's output, input and temp folders."""
+    with _generation_lock:
+        if _generation_state["running"]:
+            raise AppError(
+                "Wait for the current generation to finish before deleting "
+                "ComfyUI's media files."
+            )
+
+    result = clear_comfy_media_dirs()
+
+    # The last result now points at a deleted file, so forget that run.
+    with _generation_lock:
+        if not _generation_state["running"]:
+            _generation_state.update(
+                {
+                    "id": None,
+                    "workflow": None,
+                    "progress": None,
+                    "result": None,
+                    "error": "",
+                    "started_at": 0.0,
+                    "finished_at": 0.0,
+                }
+            )
+
+    deleted = result["deleted"]
+    failed = result["failed"]
+    message = f"Deleted {deleted} file{'' if deleted == 1 else 's'}."
+    if failed:
+        message += f" {failed} could not be deleted."
+    return {"status": message, **result}
 
 
 @app.post("/free")

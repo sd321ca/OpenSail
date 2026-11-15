@@ -296,6 +296,12 @@ For remote access, [Tailscale](https://tailscale.com/) is recommended to reach t
 
   <img width="375" height="687" alt="gallery2" src="https://github.com/user-attachments/assets/38088c6f-180e-4fec-afdf-06bf7264449c" />
 
+- **Other** — clear ComfyUI's generation history, or delete every file in
+  ComfyUI's `output`, `input` and `temp` folders. Clearing the generations
+  removes generated media and uploaded inputs, but leaves the dashboard's
+  `media/` folder and saved workflows untouched; history entries remain until
+  you also clear the history.
+
 ## Adding workflows
 
 Drop a ComfyUI API-format workflow JSON into the `workflows/` folder. The UI

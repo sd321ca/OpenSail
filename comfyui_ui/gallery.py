@@ -649,6 +649,60 @@ def cleanup_orphaned_thumbnails(
     return removed
 
 
+def clear_comfy_media_dirs() -> dict:
+    """Delete the contents of ComfyUI's output, input and temp folders.
+
+    The folders themselves are kept so ComfyUI can keep writing to them. Only
+    directories configured through ``comfy_dir`` or ``comfy_main`` are touched,
+    and cached thumbnails whose source files no longer exist are removed too.
+    Files that cannot be deleted (for example because ComfyUI still has them
+    open) are counted instead of aborting the whole operation.
+    """
+    folders = []
+    for directory in COMFY_MEDIA_DIRS:
+        name = os.path.basename(os.path.normpath(directory)).lower()
+        if name not in ("output", "input", "temp"):
+            continue
+        if os.path.isdir(directory):
+            folders.append(os.path.realpath(directory))
+    if not folders:
+        raise AppError(
+            "ComfyUI's media folders were not found. Set comfy_dir or "
+            "comfy_main in configs/constants.json first."
+        )
+
+    deleted = 0
+    failed = 0
+    for root in folders:
+        for walk_root, dirs, files in os.walk(root, topdown=False):
+            for name in files:
+                path = os.path.join(walk_root, name)
+                try:
+                    os.remove(path)
+                    deleted += 1
+                except OSError:
+                    failed += 1
+            for name in dirs:
+                path = os.path.join(walk_root, name)
+                try:
+                    if os.path.islink(path):
+                        os.unlink(path)
+                    else:
+                        os.rmdir(path)
+                except OSError:
+                    pass
+
+    # Cached previews for the deleted media are now orphaned.
+    try:
+        cleanup_orphaned_thumbnails()
+    except Exception:  # noqa: BLE001 - cleanup is best-effort
+        pass
+
+    if not deleted and failed:
+        raise AppError("None of ComfyUI's media files could be deleted.")
+    return {"deleted": deleted, "failed": failed}
+
+
 def _sorted_history(history: dict) -> list[tuple[str, dict]]:
     """Return ``(prompt_id, entry)`` pairs sorted newest-first.
 
