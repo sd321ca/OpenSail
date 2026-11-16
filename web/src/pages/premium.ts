@@ -10,7 +10,8 @@ import { setButtonBusy, toast } from "../ui";
 import type { RenderContext } from "../types";
 
 /**
- * Checkout page for licence sales.
+ * Checkout page for licence sales. Left blank until the store is live, in
+ * which case the price card shows "Coming soon" instead of a checkout button.
  */
 const PURCHASE_URL = "";
 
@@ -61,7 +62,11 @@ function upgradeSections(): string {
             <p class="mt-1 text-2xl font-semibold text-slate-100">${PRICE}</p>
           </div>
           <p class="text-xs text-slate-500">Lifetime access · Unlimited people</p>
-          <a class="btn-primary sm:ml-auto" href="${PURCHASE_URL}" target="_blank" rel="noopener noreferrer">Get a licence</a>
+          ${
+            PURCHASE_URL
+              ? `<a class="btn-primary sm:ml-auto" href="${PURCHASE_URL}" target="_blank" rel="noopener noreferrer">Get a licence</a>`
+              : `<span class="chip sm:ml-auto">Coming soon</span>`
+          }
         </div>
       </div>
   `;
