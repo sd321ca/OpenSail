@@ -1,12 +1,16 @@
-import { api, errorText } from "./api";
+import { api, ApiError, errorText, onUnauthorized } from "./api";
 import { icon, setButtonBusy, spinner, toast } from "./ui";
 import { renderGenerate } from "./pages/generate";
 import { renderChat } from "./pages/chat";
 import { renderTTS } from "./pages/tts";
 import { renderGallery } from "./pages/gallery";
 import { renderOther } from "./pages/other";
+import { renderPremium } from "./pages/premium";
+import { renderUsers } from "./pages/users";
+import { openLogin } from "./pages/login";
 import type {
   Bootstrap,
+  Capabilities,
   PageRenderer,
   RenderContext,
   ServerStatus,
@@ -19,6 +23,8 @@ interface Route {
   subtitle: string;
   icon: string;
   render: PageRenderer;
+  /** Hide the route unless the edition provides this capability. */
+  capability?: keyof Capabilities;
 }
 
 const ROUTES: Route[] = [
@@ -77,6 +83,23 @@ const ROUTES: Route[] = [
     subtitle: "Utilities and maintenance.",
     icon: "settings",
     render: renderOther,
+  },
+  {
+    key: "users",
+    label: "Users",
+    title: "Users",
+    subtitle: "Manage the profiles on this installation.",
+    icon: "chat",
+    render: renderUsers,
+    capability: "admin",
+  },
+  {
+    key: "premium",
+    label: "Premium",
+    title: "Premium",
+    subtitle: "See what Premium adds, and activate or replace a licence.",
+    icon: "settings",
+    render: renderPremium,
   },
 ];
 
@@ -183,24 +206,36 @@ const ctx: RenderContext = {
 /* Navigation                                                          */
 /* ------------------------------------------------------------------ */
 
+function visibleRoutes(): Route[] {
+  return ROUTES.filter((route) => {
+    // Premium is always listed: it explains what the paid edition adds, and
+    // activates a licence once one has been bought.
+    if (route.key === "premium") return true;
+    return !route.capability || Boolean(state.boot?.capabilities?.[route.capability]);
+  });
+}
+
 function currentRoute(): Route {
   const key = (window.location.hash || "#generate").replace(/^#/, "");
-  return ROUTES.find((route) => route.key === key) ?? ROUTES[0];
+  const routes = visibleRoutes();
+  return routes.find((route) => route.key === key) ?? routes[0];
 }
 
 function renderNav(): void {
   const nav = byId("nav-list");
   if (!nav) return;
   const route = currentRoute();
-  nav.innerHTML = ROUTES.map(
-    (item) => `
+  nav.innerHTML = visibleRoutes()
+    .map(
+      (item) => `
       <a href="#${item.key}" class="nav-link group ${item.key === route.key ? "nav-link-active" : ""}" data-route="${item.key}">
         <span class="nav-icon">${icon(item.icon, "h-[18px] w-[18px]")}</span>
         <span class="min-w-0 flex-1 truncate">${item.label}</span>
         ${item.key === route.key ? '<span class="h-1.5 w-1.5 rounded-full bg-accent-400"></span>' : ""}
       </a>
     `,
-  ).join("");
+    )
+    .join("");
 }
 
 function setSidebar(open: boolean): void {
@@ -547,21 +582,16 @@ async function bootApp(): Promise<void> {
   requireId("menu-button").addEventListener("click", () => setSidebar(true));
   requireId("sidebar-close").addEventListener("click", () => setSidebar(false));
   requireId("mobile-overlay").addEventListener("click", () => setSidebar(false));
-  requireId("comfy-start").addEventListener("click", startComfy);
-  requireId("comfy-stop").addEventListener("click", stopComfy);
-  requireId("chat-unload").addEventListener("click", unloadChat);
-  requireId("audio-unload").addEventListener("click", unloadAudio);
 
-  window.addEventListener("hashchange", () => {
-    state.cleanup?.();
-    state.cleanup = null;
-    state.page = null;
-    void navigate();
-  });
+  onUnauthorized(() => openLogin(() => window.location.reload()));
 
   try {
     state.boot = await api<Bootstrap>("/api/bootstrap");
   } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      openLogin(() => window.location.reload());
+      return;
+    }
     requireId("main").innerHTML = `
       <div class="card mx-auto mt-10 max-w-lg p-6 text-center">
         <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-300">
@@ -575,11 +605,50 @@ async function bootApp(): Promise<void> {
     return;
   }
 
+  renderUserChip();
+  requireId("comfy-start").addEventListener("click", startComfy);
+  requireId("comfy-stop").addEventListener("click", stopComfy);
+  requireId("chat-unload").addEventListener("click", unloadChat);
+  requireId("audio-unload").addEventListener("click", unloadAudio);
+
+  window.addEventListener("hashchange", () => {
+    state.cleanup?.();
+    state.cleanup = null;
+    state.page = null;
+    void navigate();
+  });
+
   renderNav();
   applyBootStatus();
   await navigate();
   void refreshConnectionStatus();
   setInterval(refreshConnectionStatus, 30000);
+}
+
+async function logout(): Promise<void> {
+  try {
+    await api("/api/logout", { method: "POST" });
+  } catch {
+    // Signing out locally is enough; the cookie is cleared server-side too.
+  }
+  window.location.reload();
+}
+
+function renderUserChip(): void {
+  const chip = byId("user-chip");
+  if (!chip) return;
+  const boot = state.boot;
+  if (!boot?.capabilities?.accounts) {
+    chip.classList.add("hidden");
+    return;
+  }
+  chip.classList.remove("hidden");
+  chip.classList.add("flex", "items-center", "gap-2");
+  chip.innerHTML = `
+    <span class="hidden text-xs text-slate-400 sm:inline">${boot.user.username}</span>
+    <button id="logout" type="button" class="btn-ghost btn-xs">Sign out</button>
+  `;
+  chip.querySelector("#logout")?.addEventListener("click", () => void logout());
 }
 
 void bootApp();

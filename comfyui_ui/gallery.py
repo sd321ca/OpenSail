@@ -16,9 +16,10 @@ from urllib.parse import urlencode
 
 from PIL import Image
 
+from . import storage
 from .audio import _resolve_ffmpeg
 from .comfy_client import ComfyUIClient, VIDEO_EXTENSIONS, is_video_filename
-from .config import COMFY_MEDIA_DIRS, COMFY_URL, LOCAL_MEDIA_DIR, THUMBNAILS_DIR
+from .config import COMFY_MEDIA_DIRS, COMFY_URL
 from .errors import AppError
 
 # Route on the app server that proxies a ComfyUI output file (images, audio and
@@ -79,15 +80,18 @@ def file_proxy_url(ref: dict) -> str:
     return f"{FILE_PROXY_ROUTE}?" + urlencode(params)
 
 
-def local_media_path(subfolder: str, filename: str) -> str | None:
-    """Resolve a local media reference to a file inside the media folder.
+def local_media_path(
+    owner_id: int, subfolder: str, filename: str
+) -> str | None:
+    """Resolve a local media reference to a file inside one owner's folder.
 
-    Returns None when the reference is empty or escapes :data:`LOCAL_MEDIA_DIR`,
-    so neither the gallery nor the file route can serve arbitrary files.
+    Returns None when the reference is empty or escapes the owner's media
+    folder, so neither the gallery nor the file route can serve arbitrary
+    files.
     """
     if not filename:
         return None
-    root = os.path.realpath(LOCAL_MEDIA_DIR)
+    root = os.path.realpath(storage.owner_path(owner_id, "media"))
     candidate = os.path.realpath(
         os.path.join(root, subfolder or "", filename)
     )
@@ -107,18 +111,21 @@ def local_thumbnail_url(filename: str, subfolder: str = "") -> str:
 
 
 def _list_local_media(
-    extensions: tuple[str, ...], limit: int | None = None
+    owner_id: int,
+    extensions: tuple[str, ...],
+    limit: int | None = None,
 ) -> list[tuple[str, str, float]]:
-    """Return ``(filename, subfolder, modified)`` triples from the media folder.
+    """Return ``(filename, subfolder, modified)`` triples from an owner's media.
 
     ``modified`` is the file's modification time as a POSIX timestamp. Entries
     are sorted newest-first. Hidden files and folders are skipped, and
     subfolders are scanned recursively.
     """
-    if not os.path.isdir(LOCAL_MEDIA_DIR):
+    media_dir = storage.owner_path(owner_id, "media")
+    if not os.path.isdir(media_dir):
         return []
 
-    root_dir = os.path.abspath(LOCAL_MEDIA_DIR)
+    root_dir = os.path.abspath(media_dir)
     found = []
     for root, dirs, files in os.walk(root_dir):
         dirs[:] = [name for name in dirs if not name.startswith(".")]
@@ -190,23 +197,21 @@ def _history_media_refs(entry: dict) -> list[dict]:
     return refs
 
 
-def _move_target(filename: str) -> str:
-    """Choose a non-colliding destination inside the local media folder."""
-    os.makedirs(LOCAL_MEDIA_DIR, exist_ok=True)
+def _move_target(owner_id: int, filename: str) -> str:
+    """Choose a non-colliding destination inside an owner's media folder."""
+    media_dir = storage.owner_dir(owner_id, "media")
     name = os.path.basename(filename or "") or "media"
     stem, extension = os.path.splitext(name)
-    target = os.path.join(LOCAL_MEDIA_DIR, name)
+    target = os.path.join(media_dir, name)
     counter = 1
     while os.path.exists(target):
-        target = os.path.join(
-            LOCAL_MEDIA_DIR, f"{stem} ({counter}){extension}"
-        )
+        target = os.path.join(media_dir, f"{stem} ({counter}){extension}")
         counter += 1
     return target
 
 
 def move_history_to_media(
-    client: ComfyUIClient, prompt_ids: list[str]
+    client: ComfyUIClient, owner_id: int, prompt_ids: list[str]
 ) -> dict:
     """Copy history outputs to the media folder and drop moved entries.
 
@@ -232,7 +237,7 @@ def move_history_to_media(
         copied = []
         try:
             for ref in refs:
-                target = _move_target(ref["filename"])
+                target = _move_target(owner_id, ref["filename"])
                 client.download_file(ref, target)
                 copied.append(target)
                 moved += 1
@@ -261,12 +266,12 @@ def _thumbnail_name(filename: str) -> str | None:
     return name or None
 
 
-def thumbnail_path(filename: str) -> str | None:
+def thumbnail_path(owner_id: int, filename: str) -> str | None:
     """Return the local path for a cached thumbnail filename."""
     name = _thumbnail_name(filename)
     if name is None:
         return None
-    return os.path.join(THUMBNAILS_DIR, name)
+    return os.path.join(storage.owner_path(owner_id, "thumbnails"), name)
 
 
 def _image_thumbnail_name(filename: str) -> str | None:
@@ -305,7 +310,7 @@ def _write_jpeg_thumbnail(image: Image.Image, target: str) -> None:
     )
 
 
-def thumbnail_url(filename: str) -> str | None:
+def thumbnail_url(owner_id: int, filename: str) -> str | None:
     """Return the proxy URL for a cached thumbnail, or None if unavailable.
 
     JPEG images reuse their original filename. Other images and videos use
@@ -314,32 +319,33 @@ def thumbnail_url(filename: str) -> str | None:
     name = _thumbnail_name(filename)
     if name is None:
         return None
+    directory = storage.owner_path(owner_id, "thumbnails")
     for candidate in (name, f"{name}.jpg", f"{name}.png"):
-        if os.path.isfile(os.path.join(THUMBNAILS_DIR, candidate)):
+        if os.path.isfile(os.path.join(directory, candidate)):
             return f"{THUMBNAIL_ROUTE}?" + urlencode({"filename": candidate})
     return None
 
 
-def save_image_thumbnail(filename: str, content: bytes) -> bool:
+def save_image_thumbnail(owner_id: int, filename: str, content: bytes) -> bool:
     """Save a compact JPEG preview of an image.
 
-    The file is written to :data:`config.THUMBNAILS_DIR`, so the gallery can
+    The file is written to the owner's thumbnail directory, so the gallery can
     use it as a lightweight preview. Failures are reported by returning False
     rather than raised: a missing thumbnail should never break generation.
     """
     name = _image_thumbnail_name(filename)
     if name is None:
         return False
-    target = os.path.join(THUMBNAILS_DIR, name)
+    directory = storage.owner_dir(owner_id, "thumbnails")
+    target = os.path.join(directory, name)
 
     try:
-        os.makedirs(THUMBNAILS_DIR, exist_ok=True)
         with Image.open(io.BytesIO(content)) as source:
             image = source.copy()
         _write_jpeg_thumbnail(image, target)
         # Drop a legacy same-name thumbnail (for example a large PNG) so the
         # gallery picks up the new JPEG immediately.
-        legacy = thumbnail_path(filename)
+        legacy = thumbnail_path(owner_id, filename)
         if legacy and legacy != target:
             try:
                 os.remove(legacy)
@@ -418,25 +424,27 @@ def _write_video_thumbnail(video_path: str, target: str) -> bool:
             pass
 
 
-def save_video_thumbnail(filename: str, video_path: str) -> bool:
+def save_video_thumbnail(
+    owner_id: int, filename: str, video_path: str
+) -> bool:
     """Extract a still frame and save it as the video's cached thumbnail.
 
-    The image is written as ``<video filename>.jpg`` in
-    :data:`config.THUMBNAILS_DIR`. Video decoding needs ffmpeg; when it is not
-    available, or extraction fails, this returns False without raising.
+    The image is written as ``<video filename>.jpg`` in the owner's thumbnail
+    directory. Video decoding needs ffmpeg; when it is not available, or
+    extraction fails, this returns False without raising.
     """
     name = _thumbnail_name(filename)
     if name is None:
         return False
-    os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+    directory = storage.owner_dir(owner_id, "thumbnails")
     return _write_video_thumbnail(
-        video_path, os.path.join(THUMBNAILS_DIR, f"{name}.jpg")
+        video_path, os.path.join(directory, f"{name}.jpg")
     )
 
 
-def _local_thumbnail_path(source_path: str) -> str | None:
+def _local_thumbnail_path(owner_id: int, source_path: str) -> str | None:
     """Return the cache path for a local media file, or None if it escapes."""
-    root = os.path.realpath(LOCAL_MEDIA_DIR)
+    root = os.path.realpath(storage.owner_path(owner_id, "media"))
     source = os.path.realpath(source_path)
     try:
         relative = os.path.relpath(source, root)
@@ -445,20 +453,23 @@ def _local_thumbnail_path(source_path: str) -> str | None:
     if relative == os.pardir or relative.startswith(os.pardir + os.sep):
         return None
     return os.path.join(
-        THUMBNAILS_DIR, LOCAL_THUMBNAILS_SUBDIR, relative + ".jpg"
+        storage.owner_path(owner_id, "thumbnails"),
+        LOCAL_THUMBNAILS_SUBDIR,
+        relative + ".jpg",
     )
 
 
-def delete_local_media(subfolder: str, filename: str) -> bool:
+def delete_local_media(owner_id: int, subfolder: str, filename: str) -> bool:
     """Delete a local media file and its cached thumbnail.
 
     Returns True when the source file was removed. Paths are resolved through
-    :func:`local_media_path`, so only files inside the media folder qualify.
+    :func:`local_media_path`, so only files inside the owner's media folder
+    qualify.
     """
-    path = local_media_path(subfolder, filename)
+    path = local_media_path(owner_id, subfolder, filename)
     if path is None:
         return False
-    target = _local_thumbnail_path(path)
+    target = _local_thumbnail_path(owner_id, path)
     try:
         os.remove(path)
     except OSError:
@@ -505,13 +516,13 @@ def _local_thumbnail_is_fresh(target: str, source_path: str) -> bool:
         return False
 
 
-def ensure_local_thumbnail(source_path: str) -> str | None:
+def ensure_local_thumbnail(owner_id: int, source_path: str) -> str | None:
     """Return a cached thumbnail for a local media file, creating it if needed.
 
     Images are decoded with Pillow and videos use ffmpeg. Returns None when the
     source is not a supported media file or the thumbnail cannot be produced.
     """
-    target = _local_thumbnail_path(source_path)
+    target = _local_thumbnail_path(owner_id, source_path)
     if target is None:
         return None
     if _local_thumbnail_is_fresh(target, source_path):
@@ -531,9 +542,12 @@ def ensure_local_thumbnail(source_path: str) -> str | None:
     return target if generated and os.path.isfile(target) else None
 
 
-def _cleanup_orphaned_local_thumbnails() -> list[str]:
-    """Delete local media thumbnails whose source file no longer exists."""
-    root = os.path.join(THUMBNAILS_DIR, LOCAL_THUMBNAILS_SUBDIR)
+def _cleanup_orphaned_local_thumbnails(owner_id: int) -> list[str]:
+    """Delete one owner's local thumbnails whose source file no longer exists."""
+    root = os.path.join(
+        storage.owner_path(owner_id, "thumbnails"), LOCAL_THUMBNAILS_SUBDIR
+    )
+    media_root = storage.owner_path(owner_id, "media")
     removed = []
     if not os.path.isdir(root):
         return removed
@@ -544,7 +558,7 @@ def _cleanup_orphaned_local_thumbnails() -> list[str]:
                 continue
             path = os.path.join(walk_root, name)
             relative = os.path.relpath(path, root)
-            source = os.path.join(LOCAL_MEDIA_DIR, relative[:-4])
+            source = os.path.join(media_root, relative[:-4])
             if os.path.isfile(source):
                 continue
             try:
@@ -623,29 +637,29 @@ def cleanup_orphaned_thumbnails(
 ) -> list[str]:
     """Delete cached thumbnails whose original media file no longer exists.
 
-    Returns the filenames that were removed. ComfyUI thumbnails are skipped
-    when neither its media folders nor its history can be read, but thumbnails
-    for the local media folder are always checked.
+    Returns the filenames that were removed. Each owner has its own thumbnail
+    cache, so every directory under ``data/users/`` is checked. ComfyUI
+    thumbnails are skipped when neither its media folders nor its history can
+    be read, but thumbnails for local media are always checked.
     """
-    removed = _cleanup_orphaned_local_thumbnails()
-    if not os.path.isdir(THUMBNAILS_DIR):
-        return removed
-
+    removed = []
     sources = _known_source_filenames(client)
-    if sources is None:
-        return removed
-
-    for name in os.listdir(THUMBNAILS_DIR):
-        path = os.path.join(THUMBNAILS_DIR, name)
-        if not os.path.isfile(path):
+    for owner_id in storage.list_owners():
+        removed.extend(_cleanup_orphaned_local_thumbnails(owner_id))
+        directory = storage.owner_path(owner_id, "thumbnails")
+        if sources is None or not os.path.isdir(directory):
             continue
-        if _thumbnail_source_name(name, sources) in sources:
-            continue
-        try:
-            os.remove(path)
-            removed.append(name)
-        except OSError:
-            pass
+        for name in os.listdir(directory):
+            path = os.path.join(directory, name)
+            if not os.path.isfile(path):
+                continue
+            if _thumbnail_source_name(name, sources) in sources:
+                continue
+            try:
+                os.remove(path)
+                removed.append(name)
+            except OSError:
+                pass
     return removed
 
 
@@ -782,18 +796,36 @@ def _load_history(client: ComfyUIClient) -> list[tuple[str, dict]]:
 
 
 def _gallery_history(
-    client: ComfyUIClient, has_local: bool
+    client: ComfyUIClient,
+    has_local: bool,
+    allowed_prompt_ids: set[str] | None = None,
 ) -> list[tuple[str, dict]]:
-    """Load ComfyUI history, keeping local media visible when it is offline."""
+    """Load ComfyUI history, keeping local media visible when it is offline.
+
+    ``allowed_prompt_ids`` restricts the result to the given prompt ids; None
+    means every entry (the single-user community edition).
+    """
     try:
-        return _load_history(client)
+        entries = _load_history(client)
     except AppError:
         if has_local:
             return []
         raise
+    if allowed_prompt_ids is None:
+        return entries
+    return [
+        (prompt_id, entry)
+        for prompt_id, entry in entries
+        if prompt_id in allowed_prompt_ids
+    ]
 
 
-def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
+def list_gallery_images(
+    client: ComfyUIClient,
+    owner_id: int,
+    limit: int = 200,
+    allowed_prompt_ids: set[str] | None = None,
+) -> list:
     """Return recent images from ComfyUI's history and the local media folder.
 
     Each entry is a dict with the image's filename, subfolder, type, proxy URL,
@@ -803,10 +835,10 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
     images = [
         _local_media_ref(filename, subfolder, thumbnail=True, created_at=modified)
         for filename, subfolder, modified in _list_local_media(
-            IMAGE_EXTENSIONS, limit
+            owner_id, IMAGE_EXTENSIONS, limit
         )
     ]
-    for prompt_id, entry in _gallery_history(client, bool(images))[:limit]:
+    for prompt_id, entry in _gallery_history(client, bool(images), allowed_prompt_ids)[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
         created_at = _history_created_at(entry)
@@ -828,12 +860,17 @@ def list_gallery_images(client: ComfyUIClient, limit: int = 200) -> list:
                 ref["url"] = file_proxy_url(ref)
                 # Only images generated through OpenSail have a cached
                 # thumbnail; older ComfyUI history falls back to the full URL.
-                ref["thumbnail_url"] = thumbnail_url(ref["filename"])
+                ref["thumbnail_url"] = thumbnail_url(owner_id, ref["filename"])
                 images.append(ref)
     return _sort_by_created_at(images)
 
 
-def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
+def list_gallery_audio(
+    client: ComfyUIClient,
+    owner_id: int,
+    limit: int = 200,
+    allowed_prompt_ids: set[str] | None = None,
+) -> list:
     """Return recent audio from ComfyUI's history and the local media folder.
 
     Each entry is a dict with the audio's filename, subfolder, type, proxy URL,
@@ -843,10 +880,10 @@ def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
     audio = [
         _local_media_ref(filename, subfolder, created_at=modified)
         for filename, subfolder, modified in _list_local_media(
-            AUDIO_EXTENSIONS, limit
+            owner_id, AUDIO_EXTENSIONS, limit
         )
     ]
-    for prompt_id, entry in _gallery_history(client, bool(audio))[:limit]:
+    for prompt_id, entry in _gallery_history(client, bool(audio), allowed_prompt_ids)[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
         created_at = _history_created_at(entry)
@@ -866,7 +903,12 @@ def list_gallery_audio(client: ComfyUIClient, limit: int = 200) -> list:
     return _sort_by_created_at(audio)
 
 
-def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
+def list_gallery_videos(
+    client: ComfyUIClient,
+    owner_id: int,
+    limit: int = 200,
+    allowed_prompt_ids: set[str] | None = None,
+) -> list:
     """Return recent videos from ComfyUI's history and the local media folder.
 
     ComfyUI's SaveVideo node reports its result under the "images" output key
@@ -878,10 +920,10 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
     videos = [
         _local_media_ref(filename, subfolder, thumbnail=True, created_at=modified)
         for filename, subfolder, modified in _list_local_media(
-            VIDEO_EXTENSIONS, limit
+            owner_id, VIDEO_EXTENSIONS, limit
         )
     ]
-    for prompt_id, entry in _gallery_history(client, bool(videos))[:limit]:
+    for prompt_id, entry in _gallery_history(client, bool(videos), allowed_prompt_ids)[:limit]:
         outputs = entry.get("outputs", {})
         prompt_text = _prompt_text(entry)
         created_at = _history_created_at(entry)
@@ -899,6 +941,6 @@ def list_gallery_videos(client: ComfyUIClient, limit: int = 200) -> list:
                     "created_at": created_at,
                 }
                 ref["url"] = file_proxy_url(ref)
-                ref["thumbnail_url"] = thumbnail_url(ref["filename"])
+                ref["thumbnail_url"] = thumbnail_url(owner_id, ref["filename"])
                 videos.append(ref)
     return _sort_by_created_at(videos)

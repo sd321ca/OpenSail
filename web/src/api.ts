@@ -2,6 +2,22 @@
 
 import type { UploadedFile } from "./types";
 
+/**
+ * Called when an authenticated request comes back 401, so the shell can show
+ * the sign-in screen. Login requests themselves are exempt.
+ */
+let unauthorizedHandler: (() => void) | null = null;
+
+export function onUnauthorized(handler: () => void): void {
+  unauthorizedHandler = handler;
+}
+
+function checkUnauthorized(path: string, response: Response): void {
+  if (response.status === 401 && !path.startsWith("/api/login")) {
+    unauthorizedHandler?.();
+  }
+}
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -60,6 +76,7 @@ export async function api<T = any>(
   }
   const response = await fetch(path, init);
   if (!response.ok) {
+    checkUnauthorized(path, response);
     throw new ApiError(await errorMessage(response), response.status);
   }
   if (response.status === 204) return null as T;
@@ -73,6 +90,7 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
   form.append("file", file, file.name || "upload");
   const response = await fetch("/api/uploads", { method: "POST", body: form });
   if (!response.ok) {
+    checkUnauthorized("/api/uploads", response);
     throw new ApiError(await errorMessage(response), response.status);
   }
   return (await response.json()) as UploadedFile;
@@ -95,6 +113,7 @@ export async function stream<T = any>(
     signal,
   });
   if (!response.ok) {
+    checkUnauthorized(path, response);
     throw new ApiError(await errorMessage(response), response.status);
   }
   if (!response.body) throw new ApiError("The server returned an empty stream.");

@@ -125,8 +125,27 @@ const job: {
 };
 
 const JOB_POLL_INTERVAL = 500;
+const JOB_POLL_TIMEOUT = 8000;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollInFlight = false;
+
+/**
+ * Fetch the job status with a deadline.
+ *
+ * A request that never settles would otherwise leave ``pollInFlight`` stuck at
+ * true, which stops every later poll and freezes the progress bar at whatever
+ * it last said. Aborting turns that into a normal failure the retry path
+ * handles.
+ */
+async function apiWithTimeout<T>(path: string, timeout: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeout);
+  try {
+    return await api<T>(path, { signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
 
 function jobElapsed(): number {
   return job.running && job.startedAt
@@ -242,7 +261,9 @@ async function pollJob(): Promise<void> {
   }
   pollInFlight = true;
   try {
-    applyJobSnapshot(await api<GenerationSnapshot>("/api/generate/status"));
+    applyJobSnapshot(
+      await apiWithTimeout<GenerationSnapshot>("/api/generate/status", JOB_POLL_TIMEOUT),
+    );
   } catch {
     // A phone dropping the request while its screen is off is expected: keep
     // the last progress visible and try again. The job runs on the server.
@@ -259,7 +280,9 @@ async function refreshJob(): Promise<JobSnapshot> {
   }
   pollInFlight = true;
   try {
-    applyJobSnapshot(await api<GenerationSnapshot>("/api/generate/status"));
+    applyJobSnapshot(
+      await apiWithTimeout<GenerationSnapshot>("/api/generate/status", JOB_POLL_TIMEOUT),
+    );
   } catch {
     // Leave the local state untouched if the server is unavailable, but keep
     // retrying when a run is still live on the server.
@@ -291,7 +314,9 @@ async function startGeneration(payload: { workflow?: string | null }): Promise<v
       // Another run is already live (for example after a rapid reload);
       // attach to it instead of reporting a failure.
       try {
-        applyJobSnapshot(await api<GenerationSnapshot>("/api/generate/status"));
+        applyJobSnapshot(
+      await apiWithTimeout<GenerationSnapshot>("/api/generate/status", JOB_POLL_TIMEOUT),
+    );
         return;
       } catch {
         // Fall through to the error below.

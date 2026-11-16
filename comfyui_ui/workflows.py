@@ -265,7 +265,7 @@ def list_node_candidates(workflow_name: str) -> list:
     return candidates
 
 
-def get_selected_bindings(workflow_name: str) -> list:
+def get_selected_bindings(workflow_name: str, owner_id: int) -> list:
     """Return the selected ``node_id|input_key`` bindings for a workflow.
 
     Entries are parsed from ``node_id|input_key|visible|display_name``; hidden
@@ -276,7 +276,7 @@ def get_selected_bindings(workflow_name: str) -> list:
         return []
 
     candidates = list_node_candidates(workflow_name)
-    saved = get_saved_fields(workflow_name)
+    saved = get_saved_fields(owner_id, workflow_name)
     if saved is None:
         return [candidate["id"] for candidate in candidates]
 
@@ -289,13 +289,13 @@ def get_selected_bindings(workflow_name: str) -> list:
     return list(dict.fromkeys(selected))
 
 
-def get_display_names(workflow_name: str) -> dict:
+def get_display_names(workflow_name: str, owner_id: int) -> dict:
     """Return saved display names, including aliases for hidden bindings."""
     if not workflow_name:
         return {}
 
     names = {}
-    for entry in get_saved_fields(workflow_name) or []:
+    for entry in get_saved_fields(owner_id, workflow_name) or []:
         binding_id, name, _visible = parse_binding_entry(entry)
         if binding_id and name:
             names[binding_id] = name

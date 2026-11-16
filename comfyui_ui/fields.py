@@ -1,14 +1,15 @@
 """Declarative input-field registry.
 
 The Generate tab's controls are described in ``configs/fields.json`` rather
-than being hard-coded in ``ui.py``. This module loads that config and exposes
-helpers so the UI can be built generically and new inputs can be added by
-editing the config file alone.
+than being hard-coded in the dashboard client. This module loads that config
+and exposes helpers so the UI can be built generically and new inputs can be
+added by editing the config file alone.
 
 The selected node bindings (``node_id|input_key``) for each workflow are stored
-separately in ``configs/workflow_fields.json``. The Generate tab writes that
-mapping back to the file when the user saves a selection, so it survives
-restarts and stays easy to edit by hand.
+separately in the owner's ``workflow_fields.json`` (see
+:mod:`comfyui_ui.storage`). The Generate tab writes that mapping back to the
+file when the user saves a selection, so it survives restarts and stays easy to
+edit by hand.
 
 Each field entry has the shape::
 
@@ -34,13 +35,13 @@ registry-only ``choices_source`` key (dropdown choices, see
 import json
 import os
 
+from . import storage
 from .config import (
     ASPECT_RATIOS,
     FIELDS_PATH,
     MUSIC_MODES,
     SAMPLERS_PATH,
     SCHEDULERS_PATH,
-    WORKFLOW_FIELDS_PATH,
 )
 
 
@@ -69,16 +70,22 @@ def load_field_config() -> dict:
     return _load_json(FIELDS_PATH)
 
 
-def load_workflow_fields_config() -> dict:
-    """Load the raw per-workflow selection config.
+def _workflow_fields_path(owner_id: int) -> str:
+    """Return the per-owner file that stores each workflow's selection."""
+    return storage.owner_file(owner_id, "workflow_fields.json")
 
-    The selections live in ``configs/workflow_fields.json`` so they can be
+
+def load_workflow_fields_config(owner_id: int) -> dict:
+    """Load the raw per-workflow selection config for one owner.
+
+    The selections live in the owner's workspace directory so they can be
     edited or versioned separately from the field definitions.
     """
-    if not os.path.isfile(WORKFLOW_FIELDS_PATH):
+    path = _workflow_fields_path(owner_id)
+    if not os.path.isfile(path):
         return {"workflow_fields": {}}
     try:
-        config = _load_json(WORKFLOW_FIELDS_PATH)
+        config = _load_json(path)
     except (OSError, json.JSONDecodeError):
         return {"workflow_fields": {}}
     if not isinstance(config, dict):
@@ -86,19 +93,14 @@ def load_workflow_fields_config() -> dict:
     return config
 
 
-def load_workflow_fields() -> dict:
-    """Return the workflow -> binding-list mapping."""
-    config = load_workflow_fields_config()
+def load_workflow_fields(owner_id: int) -> dict:
+    """Return the workflow -> binding-list mapping for one owner."""
+    config = load_workflow_fields_config(owner_id)
     selections = config.get("workflow_fields")
     return selections if isinstance(selections, dict) else {}
 
 
 FIELDS = load_field_config().get("fields", [])
-
-# Per-workflow node selections. Maps a workflow filename to a list of binding
-# IDs (``node_id|input_key``). A workflow without an entry shows every editable
-# node input it contains.
-_WORKFLOW_FIELDS = load_workflow_fields()
 
 def get_fields() -> list:
     """Return all field definitions in config order."""
@@ -132,7 +134,7 @@ def parse_binding_entry(entry) -> tuple[str | None, str | None, bool]:
     return binding_id, name, visible
 
 
-def get_saved_fields(workflow_name: str) -> list | None:
+def get_saved_fields(owner_id: int, workflow_name: str) -> list | None:
     """Return the saved node-binding list for a workflow, or None.
 
     Entries use ``node_id|input_key|visible|display_name``; use
@@ -141,22 +143,20 @@ def get_saved_fields(workflow_name: str) -> list | None:
     node input. An empty list is a saved selection that hides every node
     control.
     """
-    saved = _WORKFLOW_FIELDS.get(workflow_name)
+    saved = load_workflow_fields(owner_id).get(workflow_name)
     return list(saved) if isinstance(saved, list) else None
 
 
-def save_workflow_fields(workflow_name: str, entries: list) -> None:
+def save_workflow_fields(owner_id: int, workflow_name: str, entries: list) -> None:
     """Persist a workflow's selected bindings and hidden aliases.
 
     Every entry is written as ``node_id|input_key|visible|display_name``, where
     ``visible`` is ``true`` or ``false`` and the alias may be empty. Hidden
     entries without an alias are omitted. They are stored under the top-level
-    ``workflow_fields`` mapping in ``configs/workflow_fields.json`` in the given
-    order. The file is re-read before writing so manual edits made while the app
-    is running are preserved, then written atomically.
+    ``workflow_fields`` mapping in the owner's ``workflow_fields.json`` in the
+    given order. The file is re-read before writing so manual edits made while
+    the app is running are preserved, then written atomically.
     """
-    global _WORKFLOW_FIELDS
-
     ordered = []
     seen = set()
     for entry in entries or []:
@@ -171,24 +171,11 @@ def save_workflow_fields(workflow_name: str, entries: list) -> None:
             f"{binding_id}|{'true' if visible else 'false'}|{name}"
         )
 
-    config = load_workflow_fields_config()
+    config = load_workflow_fields_config(owner_id)
     workflow_fields = config.get("workflow_fields")
     if not isinstance(workflow_fields, dict):
         workflow_fields = {}
         config["workflow_fields"] = workflow_fields
     workflow_fields[workflow_name] = ordered
 
-    tmp_path = WORKFLOW_FIELDS_PATH + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-        os.replace(tmp_path, WORKFLOW_FIELDS_PATH)
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-    _WORKFLOW_FIELDS = workflow_fields
+    storage.write_json_atomic(_workflow_fields_path(owner_id), config)

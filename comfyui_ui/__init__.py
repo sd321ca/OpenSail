@@ -5,7 +5,6 @@ The HTTP API and static frontend live in :mod:`comfyui_ui.server` and the
 """
 
 from .config import (
-    APP_AUTH,
     COMFY_URL,
     DEFAULT_WORKFLOW,
     SERVER_NAME,
@@ -13,7 +12,6 @@ from .config import (
 )
 
 __all__ = [
-    "APP_AUTH",
     "COMFY_URL",
     "DEFAULT_WORKFLOW",
     "SERVER_NAME",

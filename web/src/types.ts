@@ -76,7 +76,55 @@ export interface Bootstrap {
   comfy_managed: boolean;
   server_name: string;
   server_port: number;
-  auth_enabled: boolean;
+  edition: "community" | "premium";
+  capabilities: Capabilities;
+  user: CurrentUser;
+  licence: LicenceState | null;
+}
+
+/** What the running edition can do. */
+export interface Capabilities {
+  accounts: boolean;
+  quotas: boolean;
+  licensing: boolean;
+  admin: boolean;
+}
+
+/** The signed-in account. */
+export interface CurrentUser {
+  id: number;
+  username: string;
+  is_admin: boolean;
+}
+
+/** State of the installed premium licence. */
+export interface LicenceState {
+  valid: boolean;
+  reason: string;
+  id: string;
+  holder: string;
+  seats: number;
+  /** True for the single-product licence, which has no per-seat limit. */
+  unlimited: boolean;
+  issued: string;
+  edition: string;
+  /** Whether a licence record exists; `false` means none is installed. */
+  installed: boolean;
+}
+
+/** A profile shown on the sign-in screen. */
+export interface Profile {
+  id: number;
+  username: string;
+  has_pin: boolean;
+  has_password: boolean;
+}
+
+/** An account row in the users page. */
+export interface UserAccount extends Profile {
+  is_admin: boolean;
+  disabled: boolean;
+  created_at: number;
 }
 
 /** Response of ``GET /api/status``. */

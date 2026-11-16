@@ -2,8 +2,8 @@
 
 A preset is a named set of values for the Generate tab's controls, so one
 workflow can have several ready-made configurations (for example ``Low
-quality`` and ``High quality``). Presets are stored in
-``configs/workflow_presets.json``::
+quality`` and ``High quality``). Presets are stored in the owner's
+``workflow_presets.json`` (see :mod:`comfyui_ui.storage`)::
 
     {
       "workflow_presets": {
@@ -24,7 +24,7 @@ quality`` and ``High quality``). Presets are stored in
     }
 
 Values are keyed by binding ID (``node_id|input_key``), the same IDs stored in
-``configs/workflow_fields.json``. A preset may therefore hold values for
+the owner's ``workflow_fields.json``. A preset may therefore hold values for
 bindings that are not currently shown; those are simply ignored when it is
 loaded. The optional ``default`` preset is applied automatically when the
 workflow is selected in the Generate tab.
@@ -35,16 +35,21 @@ import json
 import math
 import os
 
-from .config import WORKFLOW_PRESETS_PATH
+from . import storage
 from .fields import resolve_choices
 
 
-def _load_config() -> dict:
+def _presets_path(owner_id: int) -> str:
+    return storage.owner_file(owner_id, "workflow_presets.json")
+
+
+def _load_config(owner_id: int) -> dict:
     """Load the raw presets config, returning an empty one when unreadable."""
-    if not os.path.isfile(WORKFLOW_PRESETS_PATH):
+    path = _presets_path(owner_id)
+    if not os.path.isfile(path):
         return {"workflow_presets": {}}
     try:
-        with open(WORKFLOW_PRESETS_PATH, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             config = json.load(f)
     except (OSError, json.JSONDecodeError):
         return {"workflow_presets": {}}
@@ -106,28 +111,16 @@ def _clean_values(values: dict) -> dict:
     return cleaned
 
 
-def _write_config(config: dict) -> None:
-    """Write the config atomically, creating the configs folder if needed."""
-    os.makedirs(os.path.dirname(WORKFLOW_PRESETS_PATH), exist_ok=True)
-    tmp_path = WORKFLOW_PRESETS_PATH + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-        os.replace(tmp_path, WORKFLOW_PRESETS_PATH)
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+def _write_config(owner_id: int, config: dict) -> None:
+    """Write the config atomically, creating the owner directory if needed."""
+    storage.write_json_atomic(_presets_path(owner_id), config)
 
 
-def get_presets(workflow_name: str) -> dict:
+def get_presets(owner_id: int, workflow_name: str) -> dict:
     """Return the workflow's presets as a ``name -> values`` mapping."""
     if not workflow_name:
         return {}
-    entry = _workflow_entry(_load_config(), workflow_name)
+    entry = _workflow_entry(_load_config(owner_id), workflow_name)
     if entry is None:
         return {}
     presets = entry.get("presets")
@@ -140,41 +133,45 @@ def get_presets(workflow_name: str) -> dict:
     }
 
 
-def get_preset_names(workflow_name: str) -> list:
+def get_preset_names(owner_id: int, workflow_name: str) -> list:
     """Return the workflow's preset names in saved order."""
-    return list(get_presets(workflow_name))
+    return list(get_presets(owner_id, workflow_name))
 
 
-def get_preset(workflow_name: str, preset_name: str) -> dict | None:
+def get_preset(
+    owner_id: int, workflow_name: str, preset_name: str
+) -> dict | None:
     """Return one preset's binding values, or None when it does not exist."""
     if not preset_name:
         return None
-    return get_presets(workflow_name).get(preset_name)
+    return get_presets(owner_id, workflow_name).get(preset_name)
 
 
-def get_default_preset(workflow_name: str) -> str | None:
+def get_default_preset(owner_id: int, workflow_name: str) -> str | None:
     """Return the name of the preset loaded by default, or None."""
     if not workflow_name:
         return None
-    entry = _workflow_entry(_load_config(), workflow_name)
+    entry = _workflow_entry(_load_config(owner_id), workflow_name)
     if entry is None:
         return None
     default = entry.get("default")
     if not isinstance(default, str) or not default.strip():
         return None
     # Ignore a default that no longer names an existing preset.
-    return default if default in get_presets(workflow_name) else None
+    return default if default in get_presets(owner_id, workflow_name) else None
 
 
-def get_default_preset_values(workflow_name: str) -> dict:
+def get_default_preset_values(owner_id: int, workflow_name: str) -> dict:
     """Return the binding values of the workflow's default preset."""
-    default = get_default_preset(workflow_name)
+    default = get_default_preset(owner_id, workflow_name)
     if not default:
         return {}
-    return get_preset(workflow_name, default) or {}
+    return get_preset(owner_id, workflow_name, default) or {}
 
 
-def save_preset(workflow_name: str, preset_name: str, values: dict) -> None:
+def save_preset(
+    owner_id: int, workflow_name: str, preset_name: str, values: dict
+) -> None:
     """Create or replace a workflow preset and persist it.
 
     The config is re-read before writing so manual edits made while the app is
@@ -187,7 +184,7 @@ def save_preset(workflow_name: str, preset_name: str, values: dict) -> None:
     if not name:
         raise ValueError("A preset name is required.")
 
-    config = _load_config()
+    config = _load_config(owner_id)
     entries = config.get("workflow_presets")
     if not isinstance(entries, dict):
         entries = {}
@@ -205,16 +202,16 @@ def save_preset(workflow_name: str, preset_name: str, values: dict) -> None:
     if not cleaned:
         raise ValueError("A preset needs at least one input value.")
     presets[name] = cleaned
-    _write_config(config)
+    _write_config(owner_id, config)
 
 
-def delete_preset(workflow_name: str, preset_name: str) -> bool:
+def delete_preset(owner_id: int, workflow_name: str, preset_name: str) -> bool:
     """Delete a workflow preset. Returns True when one was removed."""
     name = (preset_name or "").strip()
     if not workflow_name or not name:
         return False
 
-    config = _load_config()
+    config = _load_config(owner_id)
     entry = _workflow_entry(config, workflow_name)
     if entry is None:
         return False
@@ -232,13 +229,15 @@ def delete_preset(workflow_name: str, preset_name: str) -> bool:
         if isinstance(entries, dict):
             entries.pop(workflow_name, None)
 
-    _write_config(config)
+    _write_config(owner_id, config)
     return True
 
 
-def set_default_preset(workflow_name: str, preset_name: str | None) -> None:
+def set_default_preset(
+    owner_id: int, workflow_name: str, preset_name: str | None
+) -> None:
     """Make a preset the workflow's default, or clear the default with None."""
-    config = _load_config()
+    config = _load_config(owner_id)
     entry = _workflow_entry(config, workflow_name)
     if entry is None:
         raise ValueError("That workflow has no presets.")
@@ -252,7 +251,7 @@ def set_default_preset(workflow_name: str, preset_name: str | None) -> None:
             raise ValueError(f"Preset {name!r} does not exist.")
         entry["default"] = name
 
-    _write_config(config)
+    _write_config(owner_id, config)
 
 
 # ---------------------------------------------------------------------------
@@ -264,12 +263,12 @@ def set_default_preset(workflow_name: str, preset_name: str | None) -> None:
 _PRESET_UNSET = object()
 
 
-def _preset_choices(workflow_name: str) -> list:
+def _preset_choices(owner_id: int, workflow_name: str) -> list:
     """Return preset dropdown choices, marking the workflow's default."""
-    default = get_default_preset(workflow_name)
+    default = get_default_preset(owner_id, workflow_name)
     return [
         (f"{name} (default)" if name == default else name, name)
-        for name in get_preset_names(workflow_name)
+        for name in get_preset_names(owner_id, workflow_name)
     ]
 
 

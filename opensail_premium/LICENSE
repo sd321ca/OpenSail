@@ -1,0 +1,78 @@
+OpenSail Premium - Commercial Licence
+
+Copyright (c) 2026 sd321ca. All rights reserved.
+
+This licence covers the software in this directory ("OpenSail Premium", or "the
+Software"). The rest of the OpenSail repository is licensed separately under the
+MIT Licence.
+
+1. Grant
+
+Subject to payment of the applicable fee, and to the number of users ("Seats")
+permitted by your licence, the Licensor grants you a non-exclusive,
+non-transferable, perpetual licence to install and use the Software for your own
+internal purposes, or for personal and household use.
+
+"User" means each individual who accesses the Software, including the
+administrator.
+
+2. Source code
+
+The source code of the Software is published so that you can read, audit,
+compile and modify it for your own permitted use. Publishing the source does not
+grant any right to use the Software beyond what this licence states.
+
+3. Evaluation
+
+You may evaluate the Software without a licence. An unlicensed installation runs
+in the single-owner mode of the community edition; the account, administrator
+and licence features require a valid licence.
+
+4. Restrictions
+
+You may not:
+
+(a) redistribute, sublicense, sell, rent or lend the Software, or any modified
+version of it;
+(b) make the Software available to third parties as a service, or include it
+in a product or service you provide to others;
+(c) remove or alter any copyright, licence or attribution notice;
+(d) circumvent or disable the licence check, or use the Software with more
+Users than your licence covers;
+(e) use the "OpenSail" name or logo to endorse or promote a derived product.
+
+5. Updates
+
+A licence covers all releases of the Software, including future releases, unless
+a later release states otherwise. The Licensor is not obliged to provide
+updates, support or maintenance.
+
+6. No automatic relicensing
+
+This Software does not convert to an open-source licence on any date. The
+Licensor may, at its sole discretion, publish a specific release under a
+different licence; doing so does not change the licence of any other release.
+
+7. Termination
+
+This licence terminates automatically if you breach it. On termination you must
+stop using the Software. Sections 4 and 8 survive termination.
+
+8. Warranty and liability
+
+The Software is provided "as is", without warranty of any kind, express or
+implied, including merchantability, fitness for a particular purpose and
+non-infringement. To the maximum extent permitted by law, the Licensor is not
+liable for any indirect, incidental, special or consequential damages, or for
+loss of data, profits or business, arising from the use of the Software. The
+Licensor's total liability is limited to the amount you paid for the licence.
+
+9. General
+
+This licence is governed by the laws of the Licensor's country of residence,
+without regard to conflict-of-law rules. If any provision is unenforceable, the
+remaining provisions stay in effect. This is the entire agreement between you
+and the Licensor regarding the Software.
+
+For licensing questions, contact the Licensor through the project repository or
+the store page where you bought the licence.

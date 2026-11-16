@@ -43,6 +43,7 @@ from .config import (
     AUDIOCPP_VOICE_DIR,
 )
 from .errors import AppError
+from .storage import voice_prefix
 
 
 def _find_cuda_bin_dirs() -> list:
@@ -252,22 +253,36 @@ def _sanitize_voice_name(name: str) -> str:
     return cleaned.replace(" ", "_").strip("._-")
 
 
-def list_saved_voices(voice_dir: str) -> list:
-    """Return the names of the custom voices saved in ``voice_dir``."""
+def _voice_key(owner_id: int, name: str) -> str:
+    """Return the namespaced file stem for one owner's saved voice."""
+    return voice_prefix(owner_id) + name
+
+
+def list_saved_voices(voice_dir: str, owner_id: int) -> list:
+    """Return the names of the custom voices saved by one owner.
+
+    Every account shares a single ``voice_dir`` (audio.cpp is started with one),
+    so files are stored as ``u<id>__<name>.wav`` and the prefix is stripped
+    before the names reach the dashboard.
+    """
     if not voice_dir or not os.path.isdir(voice_dir):
         return []
+    prefix = voice_prefix(owner_id)
     names = []
     try:
         with os.scandir(voice_dir) as entries:
             for entry in entries:
-                if entry.is_file() and entry.name.lower().endswith(".wav"):
-                    names.append(os.path.splitext(entry.name)[0])
+                if not entry.is_file() or not entry.name.lower().endswith(".wav"):
+                    continue
+                stem = os.path.splitext(entry.name)[0]
+                if stem.startswith(prefix):
+                    names.append(stem[len(prefix) :])
     except OSError:
         return []
     return sorted(names, key=str.lower)
 
 
-def delete_saved_voice(voice_dir: str, name: str) -> bool:
+def delete_saved_voice(voice_dir: str, owner_id: int, name: str) -> bool:
     """Delete a saved voice reference and its transcript entry.
 
     Returns True when the WAV was removed, or False when no such voice exists.
@@ -275,7 +290,8 @@ def delete_saved_voice(voice_dir: str, name: str) -> bool:
     clean = _sanitize_voice_name(name)
     if not voice_dir or not clean:
         return False
-    path = os.path.join(voice_dir, f"{clean}.wav")
+    key = _voice_key(owner_id, clean)
+    path = os.path.join(voice_dir, f"{key}.wav")
     try:
         os.remove(path)
     except FileNotFoundError:
@@ -288,7 +304,7 @@ def delete_saved_voice(voice_dir: str, name: str) -> bool:
         try:
             with open(prompt_path, "r", encoding="utf-8") as f:
                 lines = f.read().splitlines()
-            kept = [line for line in lines if not line.startswith(f"{clean}|")]
+            kept = [line for line in lines if not line.startswith(f"{key}|")]
             if len(kept) != len(lines):
                 with open(prompt_path, "w", encoding="utf-8") as f:
                     f.write("\n".join(kept) + ("\n" if kept else ""))
@@ -301,16 +317,21 @@ def delete_saved_voice(voice_dir: str, name: str) -> bool:
 
 
 def _save_voice_reference(
-    voice_dir: str, name: str, wav_path: str, transcript: str
+    voice_dir: str,
+    owner_id: int,
+    name: str,
+    wav_path: str,
+    transcript: str,
 ) -> str:
-    """Copy ``wav_path`` into ``voice_dir`` as ``name`` and record its text.
+    """Copy ``wav_path`` into ``voice_dir`` as one owner's ``name``.
 
     audio.cpp reads a ``prompt_text`` file of ``<name>|<transcript>`` lines, so
-    an existing entry for ``name`` is replaced and the transcript is collapsed
-    onto one line. Returns the saved wav path.
+    an existing entry for the namespaced name is replaced and the transcript is
+    collapsed onto one line. Returns the saved wav path.
     """
     os.makedirs(voice_dir, exist_ok=True)
-    dest = os.path.join(voice_dir, f"{name}.wav")
+    key = _voice_key(owner_id, name)
+    dest = os.path.join(voice_dir, f"{key}.wav")
     shutil.copyfile(wav_path, dest)
 
     prompt_path = os.path.join(voice_dir, "prompt_text")
@@ -320,10 +341,10 @@ def _save_voice_reference(
             lines = [
                 line
                 for line in f.read().splitlines()
-                if not line.startswith(f"{name}|")
+                if not line.startswith(f"{key}|")
             ]
     one_line = " ".join(str(transcript or "").split())
-    lines.append(f"{name}|{one_line}")
+    lines.append(f"{key}|{one_line}")
     with open(prompt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return dest

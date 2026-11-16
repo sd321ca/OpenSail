@@ -9,9 +9,6 @@ todo.md
 venv/
 env/
 
-# Secrets
-.env
-
 # OS / editor noise
 .DS_Store
 Thumbs.db
@@ -33,6 +30,9 @@ web/assets/*.map
 # Saved voice-cloning references (auto-generated, machine-specific)
 voices/
 
+# Per-user data: workspace files, media, thumbnails and the SQLite database
+data/
+
 # Cached image thumbnails used by the Image Gallery (auto-generated)
 thumbnails/
 
@@ -43,18 +43,16 @@ media/
 configs/certs/*
 !configs/certs/.gitkeep
 
-# Workflows and machine-specific config
+# Workflows and machine-specific config. The per-owner workspace files
+# (workflow_fields, workflow_presets, workflow_notes, chat_personas) live under
+# data/, which is ignored above.
 workflows/
 configs/audio_models.json
 configs/chat_models.json
-configs/chat_personas.json
 configs/constants.json
 configs/fields.json
 configs/samplers.json
 configs/schedulers.json
-configs/workflow_fields.json
-configs/workflow_notes.json
-configs/workflow_presets.json
 
 # Atomic-write leftovers from the config editors
 configs/*.tmp

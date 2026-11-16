@@ -4,4 +4,3 @@ python-multipart>=0.0.9
 requests>=2.31
 Pillow>=10.0
 websockets>=12.0
-python-dotenv>=1.0

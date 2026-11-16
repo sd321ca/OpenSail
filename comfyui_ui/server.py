@@ -9,13 +9,11 @@ the sibling modules.
 from __future__ import annotations
 
 import asyncio
-import base64
 import io
 import json
 import mimetypes
 import os
 import random
-import secrets
 import tempfile
 import threading
 import time
@@ -35,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
+from . import db, edition, identity, storage
 from .audio import (
     AudioModel,
     _convert_to_wav,
@@ -48,16 +47,17 @@ from .chat import ChatModel, _image_content_part
 from .comfy_client import ComfyUIClient
 from .comfy_process import ComfyUIProcess
 from .config import (
-    APP_AUTH,
     AUDIOCPP_VOICE_DIR,
     BASE_DIR,
     CHAT_SYSTEM_PROMPT,
     COMFY_STOP_ON_EXIT,
     COMFY_URL,
     DEFAULT_WORKFLOW,
+    GENERATION_MAX_CONCURRENT,
     KIND_AUDIO,
     KIND_VIDEO,
     LOCAL_MEDIA_DIR,
+    LOCAL_OWNER_ID,
     MAX_IMAGE_INPUTS,
     SERVER_NAME,
     SERVER_PORT,
@@ -87,6 +87,7 @@ from .gallery import (
     thumbnail_path,
 )
 from .image_meta import extract_image_metadata, extract_image_metadata_path
+from .jobs import JobForbidden, JobNotFound, JobQueue
 from .models import CHAT_MODELS, DEFAULT_CHAT_MODEL_PATH
 from .notes import get_workflow_notes, save_workflow_notes
 from .personas import delete_persona, get_personas, save_persona
@@ -119,6 +120,10 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 os.makedirs(LOCAL_MEDIA_DIR, exist_ok=True)
 
+# Per-user data lives under ``data/users/<id>/``. Make sure its directory tree
+# exists before any request can read it.
+storage.ensure_owner_tree(LOCAL_OWNER_ID)
+
 # mimetypes misses a few modern formats on some platforms (notably WebP and
 # AVIF on Windows). Local gallery files are served inline, so supply them.
 _EXTRA_MEDIA_TYPES = {
@@ -141,21 +146,11 @@ comfy_process = ComfyUIProcess()
 chat_model = ChatModel()
 audio_model = AudioModel()
 
-# ComfyUI generation runs in a background thread so the job outlives the
-# browser connection. The dashboard polls /api/generate/status to catch up
-# after navigation, a reload, or the phone screen turning off.
-_generation_lock = threading.Lock()
-_generation_cancel = threading.Event()
-_generation_state: dict[str, Any] = {
-    "id": None,
-    "running": False,
-    "workflow": None,
-    "progress": None,
-    "result": None,
-    "error": "",
-    "started_at": 0.0,
-    "finished_at": 0.0,
-}
+# ComfyUI generation runs on a background worker so a job outlives the browser
+# connection, and so requests from several accounts queue instead of failing.
+# The dashboard polls /api/generate/status to catch up after navigation, a
+# reload, or the phone screen turning off.
+queue = JobQueue(lambda job: _generate_events(job), GENERATION_MAX_CONCURRENT)
 
 # In-memory stores. Tokens are unguessable and short-lived; the files themselves
 # are cleaned up after a day.
@@ -269,7 +264,9 @@ def _upload_item(upload_id: str | None) -> dict:
     return item
 
 
-def _media_ref_path(ref: Optional[dict], kind: str = "file") -> Optional[str]:
+def _media_ref_path(
+    ref: Optional[dict], kind: str = "file", owner_id: int = LOCAL_OWNER_ID
+) -> Optional[str]:
     """Resolve an upload or gallery reference to a local file path."""
     if not ref:
         return None
@@ -280,7 +277,9 @@ def _media_ref_path(ref: Optional[dict], kind: str = "file") -> Optional[str]:
     if gallery:
         if gallery.get("type") == LOCAL_MEDIA_TYPE:
             path = local_media_path(
-                gallery.get("subfolder", ""), gallery.get("filename", "")
+                owner_id,
+                gallery.get("subfolder", ""),
+                gallery.get("filename", ""),
             )
             if path is None:
                 raise AppError("That file is no longer in the local media folder.")
@@ -301,7 +300,9 @@ def _media_ref_path(ref: Optional[dict], kind: str = "file") -> Optional[str]:
     return None
 
 
-def _image_ref_image(ref: Optional[dict]) -> Image.Image | None:
+def _image_ref_image(
+    ref: Optional[dict], owner_id: int = LOCAL_OWNER_ID
+) -> Image.Image | None:
     """Open an upload/gallery image reference as a PIL image."""
     if not ref:
         return None
@@ -314,7 +315,9 @@ def _image_ref_image(ref: Optional[dict]) -> Image.Image | None:
     if gallery:
         if gallery.get("type") == LOCAL_MEDIA_TYPE:
             path = local_media_path(
-                gallery.get("subfolder", ""), gallery.get("filename", "")
+                owner_id,
+                gallery.get("subfolder", ""),
+                gallery.get("filename", ""),
             )
             if path is None:
                 return None
@@ -365,12 +368,63 @@ def _binding_values(candidates: list, selected: list, overrides: dict) -> dict:
     return values
 
 
-def _workflow_payload(workflow_name: str) -> dict:
+def _visible_prompt_ids(owner_id: int):
+    """Return the ComfyUI prompt ids an owner may see, or None for all."""
+    if not edition.can("accounts"):
+        return None
+    ids = db.prompt_ids_for(owner_id)
+    if not ids and owner_id == LOCAL_OWNER_ID:
+        # An installation that predates accounts has no recorded prompt ids
+        # yet, so its original owner keeps seeing the existing history.
+        return None
+    return ids
+
+
+def _require_admin() -> None:
+    """Refuse an action that affects every account."""
+    if not identity.current_owner().is_admin:
+        raise HTTPException(
+            status_code=403, detail="Administrator access required."
+        )
+
+
+def _owns_media(owner_id: int, filename: str) -> bool:
+    """Return whether an owner produced this ComfyUI output file."""
+    if not edition.can("accounts"):
+        return True
+    owner = db.media_owner(filename)
+    if owner is None:
+        # Files generated before accounts existed belong to the first owner.
+        return owner_id == LOCAL_OWNER_ID
+    return owner == owner_id
+
+
+def _owns_thumbnail(owner_id: int, name: str) -> bool:
+    """Return whether an owner produced the image behind a thumbnail."""
+    if not edition.can("accounts"):
+        return True
+    candidates = [name]
+    if name.lower().endswith(".jpg"):
+        candidates.append(name[:-4])
+    return any(db.media_owner(candidate) == owner_id for candidate in candidates)
+
+
+def _owned_prompt_ids(owner_id: int, prompt_ids: list[str]) -> list[str]:
+    """Keep only the prompt ids that belong to ``owner_id``."""
+    if not edition.can("accounts"):
+        return prompt_ids
+    owned = db.prompt_ids_for(owner_id)
+    if not owned and owner_id == LOCAL_OWNER_ID:
+        return prompt_ids
+    return [prompt_id for prompt_id in prompt_ids if prompt_id in owned]
+
+
+def _workflow_payload(owner_id: int, workflow_name: str) -> dict:
     candidates = list_node_candidates(workflow_name)
-    selected = get_selected_bindings(workflow_name)
-    names = get_display_names(workflow_name)
-    defaults = get_default_preset_values(workflow_name)
-    presets = get_presets(workflow_name)
+    selected = get_selected_bindings(workflow_name, owner_id)
+    names = get_display_names(workflow_name, owner_id)
+    defaults = get_default_preset_values(owner_id, workflow_name)
+    presets = get_presets(owner_id, workflow_name)
     return {
         "name": workflow_name,
         "kind": get_workflow_kind(workflow_name),
@@ -397,9 +451,9 @@ def _workflow_payload(workflow_name: str) -> dict:
         ],
         "presets": presets,
         "preset_names": list(presets),
-        "default_preset": get_default_preset(workflow_name),
-        "notes": get_workflow_notes(workflow_name),
-        "saved_selection": get_saved_fields(workflow_name) is not None,
+        "default_preset": get_default_preset(owner_id, workflow_name),
+        "notes": get_workflow_notes(owner_id, workflow_name),
+        "saved_selection": get_saved_fields(owner_id, workflow_name) is not None,
     }
 
 
@@ -592,6 +646,11 @@ def _install_loop_exception_handler() -> None:
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _install_loop_exception_handler()
+    for hook in edition.HOOKS.get("startup") or []:
+        try:
+            hook()
+        except Exception:  # noqa: BLE001 - an edition hook must not block startup
+            pass
     # Scan in the background so a large ComfyUI output folder does not delay
     # startup.
     threading.Thread(
@@ -600,6 +659,11 @@ async def _lifespan(_app: FastAPI):
         daemon=True,
     ).start()
     yield
+    for hook in edition.HOOKS.get("shutdown") or []:
+        try:
+            hook()
+        except Exception:  # noqa: BLE001
+            pass
     for manager in (chat_model, audio_model):
         try:
             manager.unload()
@@ -612,33 +676,50 @@ async def _lifespan(_app: FastAPI):
             pass
 
 
+# Load the selected edition before the app is built. Premium registers its
+# capabilities, authentication provider and routes; the community edition
+# leaves every default in place.
+edition.load()
+
 app = FastAPI(title="OpenSail", lifespan=_lifespan)
+
+for _router in edition.HOOKS.get("mount_routes") or []:
+    app.include_router(_router)
+
+
+def _is_public_path(path: str) -> bool:
+    """Return whether a path must be reachable before signing in."""
+    if path in ("/", "/favicon.ico") or path.startswith("/assets/"):
+        return True
+    for prefix in edition.HOOKS.get("public_paths") or ():
+        prefix = prefix.rstrip("/")
+        if path == prefix or path.startswith(prefix + "/"):
+            return True
+    return False
 
 
 @app.middleware("http")
-async def _basic_auth(request: Request, call_next):
-    """Protect the dashboard with HTTP Basic auth when credentials are set."""
-    if not APP_AUTH:
+async def _owner_middleware(request: Request, call_next):
+    """Resolve who is calling and expose it to the rest of the request."""
+    if _is_public_path(request.url.path):
         return await call_next(request)
 
-    header = request.headers.get("authorization", "")
-    if header.lower().startswith("basic "):
-        try:
-            decoded = base64.b64decode(header[6:]).decode("utf-8")
-            username, _, password = decoded.partition(":")
-        except (ValueError, UnicodeDecodeError):
-            username = password = ""
-        expected_user, expected_password = APP_AUTH
-        if secrets.compare_digest(username, expected_user) and secrets.compare_digest(
-            password, expected_password
-        ):
-            return await call_next(request)
-
-    return Response(
-        status_code=401,
-        content="Authentication required.",
-        headers={"WWW-Authenticate": 'Basic realm="OpenSail"'},
+    provider = edition.HOOKS.get("auth_provider")
+    owner = (
+        provider(request) if provider is not None else identity.LOCAL_OWNER
     )
+    if owner is None:
+        if request.url.path.startswith("/api/"):
+            return JSONResponse(
+                status_code=401, content={"detail": "Authentication required."}
+            )
+        return Response(status_code=401, content="Authentication required.")
+
+    token = identity.set_owner(owner)
+    try:
+        return await call_next(request)
+    finally:
+        identity.reset_owner(token)
 
 
 @app.exception_handler(AppError)
@@ -680,6 +761,8 @@ def _default_workflow(workflows: list[str]) -> str | None:
 def bootstrap() -> dict:
     workflows = list_workflows()
     default = _default_workflow(workflows)
+    owner = identity.current_owner()
+    licence_hook = edition.HOOKS.get("licence_state")
     return {
         "workflows": [
             {"name": name, "label": os.path.splitext(name)[0]} for name in workflows
@@ -693,7 +776,7 @@ def bootstrap() -> dict:
             {"alias": entry["alias"], "id": entry["id"]} for entry in TTS_MODELS
         ],
         "chat_system_prompt": CHAT_SYSTEM_PROMPT,
-        "chat_personas": get_personas(),
+        "chat_personas": get_personas(owner.id),
         "chat_loaded": chat_model.loaded,
         "chat_model": chat_model.loaded_name,
         "chat_status": chat_model.status(),
@@ -705,7 +788,14 @@ def bootstrap() -> dict:
         "comfy_managed": comfy_process.running,
         "server_name": SERVER_NAME,
         "server_port": SERVER_PORT,
-        "auth_enabled": APP_AUTH is not None,
+        "edition": edition.current(),
+        "capabilities": dict(edition.CAPABILITIES),
+        "user": {
+            "id": owner.id,
+            "username": owner.username,
+            "is_admin": owner.is_admin,
+        },
+        "licence": licence_hook() if licence_hook else None,
     }
 
 
@@ -738,6 +828,7 @@ def status() -> dict:
 @app.post("/history")
 def clear_history() -> dict:
     """Clear ComfyUI's generation history and the last-run dashboard state."""
+    _require_admin()
     try:
         response = requests.post(
             f"{COMFY_URL.rstrip('/')}/history",
@@ -751,48 +842,25 @@ def clear_history() -> dict:
     # The Generate page restores the workflow and output of the most recent
     # run from this snapshot. Clearing history should also forget that run so
     # it is not reopened afterwards. Leave an in-flight generation untouched.
-    with _generation_lock:
-        if not _generation_state["running"]:
-            _generation_state.update(
-                {
-                    "id": None,
-                    "workflow": None,
-                    "progress": None,
-                    "result": None,
-                    "error": "",
-                    "started_at": 0.0,
-                    "finished_at": 0.0,
-                }
-            )
+    if not queue.any_active():
+        queue.clear_latest(identity.current_owner().id)
     return {"status": "History cleared."}
 
 
 @app.post("/api/comfy/media/clear")
 def clear_comfy_media() -> dict:
     """Delete the contents of ComfyUI's output, input and temp folders."""
-    with _generation_lock:
-        if _generation_state["running"]:
-            raise AppError(
-                "Wait for the current generation to finish before deleting "
-                "ComfyUI's media files."
-            )
+    _require_admin()
+    if queue.any_active():
+        raise AppError(
+            "Wait for the current generation to finish before deleting "
+            "ComfyUI's media files."
+        )
 
     result = clear_comfy_media_dirs()
 
     # The last result now points at a deleted file, so forget that run.
-    with _generation_lock:
-        if not _generation_state["running"]:
-            _generation_state.update(
-                {
-                    "id": None,
-                    "workflow": None,
-                    "progress": None,
-                    "result": None,
-                    "error": "",
-                    "started_at": 0.0,
-                    "finished_at": 0.0,
-                }
-            )
+    queue.clear_latest(identity.current_owner().id)
 
     deleted = result["deleted"]
     failed = result["failed"]
@@ -805,6 +873,10 @@ def clear_comfy_media() -> dict:
 @app.post("/free")
 def free_memory(body: FreeBody = Body(default=FreeBody())) -> dict:
     """Ask ComfyUI to unload models and/or free cached memory."""
+    if queue.any_active():
+        raise AppError(
+            "Wait for the current generation to finish before freeing memory."
+        )
     try:
         response = requests.post(
             f"{COMFY_URL.rstrip('/')}/free",
@@ -857,7 +929,7 @@ def comfy_stop() -> dict:
 
 @app.get("/api/workflows/{workflow_name}")
 def get_workflow_config(workflow_name: str) -> dict:
-    return _workflow_payload(_workflow_name(workflow_name))
+    return _workflow_payload(identity.current_owner().id, _workflow_name(workflow_name))
 
 
 @app.put("/api/workflows/{workflow_name}/fields")
@@ -879,17 +951,17 @@ def put_workflow_fields(workflow_name: str, body: FieldSelection) -> dict:
         entries.append(f"{entry.id}|{visible}|{clean_name}")
 
     try:
-        save_workflow_fields(name, entries)
+        save_workflow_fields(identity.current_owner().id, name, entries)
     except OSError as exc:
         raise AppError(f"Could not save the input selection: {exc}") from exc
-    return _workflow_payload(name)
+    return _workflow_payload(identity.current_owner().id, name)
 
 
 @app.put("/api/workflows/{workflow_name}/notes")
 def put_workflow_notes(workflow_name: str, body: NotesBody) -> dict:
     name = _workflow_name(workflow_name)
     try:
-        notes = save_workflow_notes(name, body.notes)
+        notes = save_workflow_notes(identity.current_owner().id, name, body.notes)
     except OSError as exc:
         raise AppError(f"Could not save the workflow notes: {exc}") from exc
     return {"notes": notes}
@@ -899,32 +971,34 @@ def put_workflow_notes(workflow_name: str, body: NotesBody) -> dict:
 def post_preset(workflow_name: str, body: PresetBody) -> dict:
     name = _workflow_name(workflow_name)
     try:
-        save_preset(name, body.name, body.values)
+        save_preset(
+            identity.current_owner().id, name, body.name, body.values
+        )
     except (OSError, ValueError) as exc:
         raise AppError(f"Could not save the preset: {exc}") from exc
-    return _workflow_payload(name)
+    return _workflow_payload(identity.current_owner().id, name)
 
 
 @app.post("/api/workflows/{workflow_name}/presets/delete")
 def post_delete_preset(workflow_name: str, body: PresetNameBody) -> dict:
     name = _workflow_name(workflow_name)
     try:
-        removed = delete_preset(name, body.name or "")
+        removed = delete_preset(identity.current_owner().id, name, body.name or "")
     except OSError as exc:
         raise AppError(f"Could not delete the preset: {exc}") from exc
     if not removed:
         raise AppError("That preset no longer exists.")
-    return _workflow_payload(name)
+    return _workflow_payload(identity.current_owner().id, name)
 
 
 @app.post("/api/workflows/{workflow_name}/presets/default")
 def post_default_preset(workflow_name: str, body: PresetNameBody) -> dict:
     name = _workflow_name(workflow_name)
     try:
-        set_default_preset(name, body.name)
+        set_default_preset(identity.current_owner().id, name, body.name)
     except (OSError, ValueError) as exc:
         raise AppError(f"Could not set the default preset: {exc}") from exc
-    return _workflow_payload(name)
+    return _workflow_payload(identity.current_owner().id, name)
 
 
 # ---------------------------------------------------------------------------
@@ -976,12 +1050,14 @@ def get_media(token: str) -> FileResponse:
 # ---------------------------------------------------------------------------
 
 
-def _generate_events(body: GenerateBody):
+def _generate_events(job):
     """Yield generation events while a ComfyUI workflow runs."""
+    body = job.body
+    owner_id = job.owner_id
     prompt_id = None
 
     def cancelled() -> bool:
-        return _generation_cancel.is_set()
+        return job.cancel.is_set()
 
     try:
         workflow_name = _workflow_name(body.workflow)
@@ -1016,7 +1092,9 @@ def _generate_events(body: GenerateBody):
         load_nodes = list_load_image_nodes(workflow_name)[:MAX_IMAGE_INPUTS]
         for index, (node_id, _label) in enumerate(load_nodes):
             ref = body.images[index] if index < len(body.images) else None
-            image = _image_ref_image(ref.model_dump() if ref else None)
+            image = _image_ref_image(
+                ref.model_dump() if ref else None, owner_id
+            )
             if image is not None:
                 image_filenames[node_id] = client.upload_image(
                     image, prefix=f"node_{node_id}"
@@ -1029,7 +1107,7 @@ def _generate_events(body: GenerateBody):
         audio_filenames = {}
         audio_nodes = list_load_audio_nodes(workflow_name)
         if audio_nodes and body.audio:
-            path = _media_ref_path(body.audio.model_dump(), "audio")
+            path = _media_ref_path(body.audio.model_dump(), "audio", owner_id)
             if path:
                 audio_filenames[audio_nodes[0][0]] = client.upload_audio(
                     path, prefix=f"node_{audio_nodes[0][0]}"
@@ -1038,7 +1116,7 @@ def _generate_events(body: GenerateBody):
         video_filenames = {}
         video_nodes = list_load_video_nodes(workflow_name)
         if video_nodes and body.video:
-            path = _media_ref_path(body.video.model_dump(), "video")
+            path = _media_ref_path(body.video.model_dump(), "video", owner_id)
             if path:
                 video_filenames[video_nodes[0][0]] = client.upload_video(
                     path, prefix=f"node_{video_nodes[0][0]}"
@@ -1055,7 +1133,8 @@ def _generate_events(body: GenerateBody):
         client_id = str(uuid.uuid4())
         prompt_id = client.queue_prompt(workflow, client_id)
         yield {
-            "type": "progress",
+            "type": "queued",
+            "prompt_id": prompt_id,
             "value": 0,
             "indeterminate": True,
             "message": "Queued...",
@@ -1096,6 +1175,7 @@ def _generate_events(body: GenerateBody):
         if kind == KIND_AUDIO:
             audio_ref = client.wait_for_audio(prompt_id, client_id)
             path = client.fetch_audio(audio_ref)
+            db.record_media(owner_id, audio_ref.get("filename", ""), "audio")
             yield {
                 "type": "result",
                 "kind": "audio",
@@ -1105,10 +1185,13 @@ def _generate_events(body: GenerateBody):
         elif kind == KIND_VIDEO:
             video_ref = client.wait_for_video(prompt_id, client_id)
             path = client.fetch_video(video_ref)
+            db.record_media(owner_id, video_ref.get("filename", ""), "video")
             # Cache a still frame for the Video Gallery's preview poster.
             # This is best-effort: a failure here must not fail generation.
             try:
-                save_video_thumbnail(video_ref.get("filename", ""), path)
+                save_video_thumbnail(
+                    owner_id, video_ref.get("filename", ""), path
+                )
             except Exception:  # noqa: BLE001
                 pass
             yield {
@@ -1119,11 +1202,14 @@ def _generate_events(body: GenerateBody):
             }
         else:
             image_ref = client.wait_for_image(prompt_id, client_id)
+            db.record_media(owner_id, image_ref.get("filename", ""), "image")
             # Cache a downscaled copy for the Image Gallery's preview tiles.
             # This is best-effort: a failure here must not fail generation.
             try:
                 content, _content_type = client.fetch_image_bytes(image_ref)
-                save_image_thumbnail(image_ref.get("filename", ""), content)
+                save_image_thumbnail(
+                    owner_id, image_ref.get("filename", ""), content
+                )
             except Exception:  # noqa: BLE001
                 pass
             yield {
@@ -1148,131 +1234,50 @@ def _generate_events(body: GenerateBody):
         yield {"type": "error", "message": f"Generation failed: {exc}"}
 
 
-def _record_generation_event(event: dict) -> None:
-    """Merge one generator event into the shared job state."""
-    kind = event.get("type")
-    with _generation_lock:
-        if kind in ("phase", "progress"):
-            _generation_state["progress"] = {
-                "value": event.get("value"),
-                "message": event.get("message", ""),
-                "indeterminate": bool(event.get("indeterminate")),
-            }
-        elif kind == "result":
-            _generation_state["result"] = {
-                "kind": event.get("kind"),
-                "url": event.get("url"),
-                "filename": event.get("filename", ""),
-            }
-        elif kind in ("error", "cancelled"):
-            _generation_state["error"] = event.get("message") or (
-                "Generation cancelled." if kind == "cancelled" else "Generation failed."
-            )
-            _generation_state["running"] = False
-            _generation_state["finished_at"] = time.monotonic()
-        elif kind == "done":
-            _generation_state["running"] = False
-            _generation_state["finished_at"] = time.monotonic()
-            _generation_state["progress"] = {
-                "value": 1,
-                "message": "Done.",
-                "indeterminate": False,
-            }
-
-
-def _run_generation(body: GenerateBody) -> None:
-    """Drive one generation to completion in a worker thread."""
-    try:
-        for event in _generate_events(body):
-            _record_generation_event(event)
-    finally:
-        with _generation_lock:
-            if _generation_state["running"]:
-                # The generator stopped without a terminal event.
-                _generation_state["running"] = False
-                if not _generation_state["error"]:
-                    if _generation_state["result"]:
-                        _generation_state["progress"] = {
-                            "value": 1,
-                            "message": "Done.",
-                            "indeterminate": False,
-                        }
-                    else:
-                        _generation_state["error"] = "Generation ended unexpectedly."
-            if not _generation_state["finished_at"]:
-                _generation_state["finished_at"] = time.monotonic()
-
-
-def _generation_snapshot_locked() -> dict:
-    """Build a JSON-safe snapshot of the job. Caller holds the lock."""
-    state = _generation_state
-    elapsed_ms = 0.0
-    if state["started_at"]:
-        end = (
-            time.monotonic()
-            if state["running"]
-            else (state["finished_at"] or time.monotonic())
-        )
-        elapsed_ms = max(0.0, (end - state["started_at"]) * 1000.0)
-    return {
-        "id": state["id"],
-        "running": state["running"],
-        "workflow": state["workflow"],
-        "progress": dict(state["progress"]) if state["progress"] else None,
-        "result": dict(state["result"]) if state["result"] else None,
-        "error": state["error"],
-        "elapsed_ms": elapsed_ms,
-    }
-
-
-def _generation_snapshot() -> dict:
-    with _generation_lock:
-        return _generation_snapshot_locked()
+def _job_error(exc: Exception) -> HTTPException:
+    """Map a queue error to the HTTP status the dashboard expects."""
+    if isinstance(exc, JobNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=403, detail=str(exc))
 
 
 @app.post("/api/generate")
 def generate(body: GenerateBody) -> dict:
-    """Start a generation in the background and return its first snapshot."""
-    with _generation_lock:
-        if _generation_state["running"]:
-            raise HTTPException(
-                status_code=409, detail="A generation is already running."
-            )
-        _generation_cancel.clear()
-        _generation_state.update(
-            {
-                "id": uuid.uuid4().hex,
-                "running": True,
-                "workflow": body.workflow,
-                "progress": {
-                    "value": 0,
-                    "message": "Preparing…",
-                    "indeterminate": True,
-                },
-                "result": None,
-                "error": "",
-                "started_at": time.monotonic(),
-                "finished_at": 0.0,
-            }
-        )
-        threading.Thread(
-            target=_run_generation, args=(body,), daemon=True
-        ).start()
-        return _generation_snapshot_locked()
+    """Queue a generation and return its first snapshot."""
+    return queue.submit(identity.current_owner().id, body.workflow, body)
 
 
 @app.get("/api/generate/status")
 def generation_status() -> JSONResponse:
-    """Return the live state of the last/current generation."""
+    """Return the live state of the caller's latest generation."""
     return JSONResponse(
-        _generation_snapshot(), headers={"Cache-Control": "no-store"}
+        queue.latest(identity.current_owner().id), headers={"Cache-Control": "no-store"}
     )
+
+
+@app.get("/api/generate/status/{job_id}")
+def generation_status_by_id(job_id: str) -> JSONResponse:
+    """Return one of the caller's jobs by id."""
+    try:
+        snapshot = queue.snapshot(job_id, identity.current_owner().id)
+    except (JobNotFound, JobForbidden) as exc:
+        raise _job_error(exc) from exc
+    return JSONResponse(snapshot, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/generate/cancel")
 def cancel_generation() -> dict:
-    _generation_cancel.set()
-    return {"ok": True}
+    """Cancel the caller's active generation, if any."""
+    return queue.cancel_latest(identity.current_owner().id)
+
+
+@app.post("/api/generate/cancel/{job_id}")
+def cancel_generation_by_id(job_id: str) -> dict:
+    """Cancel one of the caller's generations."""
+    try:
+        return queue.cancel(job_id, identity.current_owner().id)
+    except (JobNotFound, JobForbidden) as exc:
+        raise _job_error(exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1283,7 +1288,15 @@ def cancel_generation() -> dict:
 @app.get("/api/gallery/images")
 def gallery_images(limit: int = Query(200, ge=1, le=1000)) -> dict:
     _cleanup_thumbnails()
-    return {"items": list_gallery_images(client, limit=limit)}
+    owner_id = identity.current_owner().id
+    return {
+        "items": list_gallery_images(
+            client,
+            owner_id,
+            limit=limit,
+            allowed_prompt_ids=_visible_prompt_ids(owner_id),
+        )
+    }
 
 
 @app.get("/api/gallery/image-metadata")
@@ -1294,7 +1307,7 @@ def gallery_image_metadata(
 ) -> dict:
     """Return the ComfyUI generation metadata embedded in a gallery image."""
     if type == LOCAL_MEDIA_TYPE:
-        path = local_media_path(subfolder, filename)
+        path = local_media_path(identity.current_owner().id, subfolder, filename)
         if path is None:
             raise HTTPException(status_code=404, detail="Media file not found.")
         return {
@@ -1316,13 +1329,29 @@ def gallery_image_metadata(
 
 @app.get("/api/gallery/audio")
 def gallery_audio(limit: int = Query(200, ge=1, le=1000)) -> dict:
-    return {"items": list_gallery_audio(client, limit=limit)}
+    owner_id = identity.current_owner().id
+    return {
+        "items": list_gallery_audio(
+            client,
+            owner_id,
+            limit=limit,
+            allowed_prompt_ids=_visible_prompt_ids(owner_id),
+        )
+    }
 
 
 @app.get("/api/gallery/videos")
 def gallery_videos(limit: int = Query(200, ge=1, le=1000)) -> dict:
     _cleanup_thumbnails()
-    return {"items": list_gallery_videos(client, limit=limit)}
+    owner_id = identity.current_owner().id
+    return {
+        "items": list_gallery_videos(
+            client,
+            owner_id,
+            limit=limit,
+            allowed_prompt_ids=_visible_prompt_ids(owner_id),
+        )
+    }
 
 
 @app.post("/api/gallery/delete")
@@ -1338,6 +1367,15 @@ def gallery_delete(body: GallerySelectionBody) -> dict:
 
     prompt_ids = list(dict.fromkeys(prompt_ids))
     if prompt_ids:
+        allowed = _owned_prompt_ids(
+            identity.current_owner().id, prompt_ids
+        )
+        if len(allowed) != len(prompt_ids):
+            raise HTTPException(
+                status_code=403,
+                detail="Those items belong to another user.",
+            )
+        prompt_ids = allowed
         try:
             client.delete_history(prompt_ids)
         except Exception as exc:  # noqa: BLE001
@@ -1348,7 +1386,9 @@ def gallery_delete(body: GallerySelectionBody) -> dict:
     deleted_local = sum(
         1
         for item in local_items
-        if delete_local_media(item.subfolder, item.filename)
+        if delete_local_media(
+            identity.current_owner().id, item.subfolder, item.filename
+        )
     )
     if not prompt_ids and not deleted_local:
         raise AppError("None of the selected items could be deleted.")
@@ -1367,11 +1407,18 @@ def gallery_move(body: GallerySelectionBody) -> dict:
         if item.type != LOCAL_MEDIA_TYPE and item.prompt_id
     ]
     prompt_ids = list(dict.fromkeys(prompt_ids))
+    allowed = _owned_prompt_ids(identity.current_owner().id, prompt_ids)
+    if len(allowed) != len(prompt_ids):
+        raise HTTPException(
+            status_code=403,
+            detail="Those items belong to another user.",
+        )
+    prompt_ids = allowed
     if not prompt_ids:
         raise AppError("Select one or more ComfyUI items to move.")
 
     try:
-        result = move_history_to_media(client, prompt_ids)
+        result = move_history_to_media(client, identity.current_owner().id, prompt_ids)
     except Exception as exc:  # noqa: BLE001
         raise AppError(f"Could not move media to the media folder: {exc}") from exc
 
@@ -1383,7 +1430,9 @@ def gallery_move(body: GallerySelectionBody) -> dict:
 @app.get("/api/gallery/thumbnail")
 def gallery_thumbnail(filename: str):
     """Serve a cached gallery thumbnail by its original filename."""
-    path = thumbnail_path(filename)
+    if not _owns_thumbnail(identity.current_owner().id, filename):
+        raise HTTPException(status_code=404, detail="Thumbnail not found.")
+    path = thumbnail_path(identity.current_owner().id, filename)
     if path is None or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="Thumbnail not found.")
     return FileResponse(path)
@@ -1392,11 +1441,11 @@ def gallery_thumbnail(filename: str):
 @app.get("/api/gallery/local-thumbnail")
 def gallery_local_thumbnail(filename: str, subfolder: str = ""):
     """Generate and serve a thumbnail for a local media file."""
-    path = local_media_path(subfolder, filename)
+    path = local_media_path(identity.current_owner().id, subfolder, filename)
     if path is None:
         raise HTTPException(status_code=404, detail="Media file not found.")
 
-    thumbnail = ensure_local_thumbnail(path)
+    thumbnail = ensure_local_thumbnail(identity.current_owner().id, path)
     if thumbnail is not None:
         return FileResponse(thumbnail, media_type="image/jpeg")
 
@@ -1418,11 +1467,13 @@ def gallery_file(
 ):
     """Proxy a ComfyUI output file, or serve one from the local media folder."""
     if type == LOCAL_MEDIA_TYPE:
-        path = local_media_path(subfolder, filename)
+        path = local_media_path(identity.current_owner().id, subfolder, filename)
         if path is None:
             raise HTTPException(status_code=404, detail="Media file not found.")
         return FileResponse(path, media_type=_local_media_type(path))
 
+    if not _owns_media(identity.current_owner().id, filename):
+        raise HTTPException(status_code=404, detail="File not found.")
     params = {"filename": filename, "subfolder": subfolder, "type": type}
     headers = {}
     range_header = request.headers.get("range")
@@ -1608,27 +1659,27 @@ def chat_cancel() -> dict:
 
 @app.get("/api/chat/personas")
 def chat_personas() -> dict:
-    return {"personas": get_personas()}
+    return {"personas": get_personas(identity.current_owner().id)}
 
 
 @app.post("/api/chat/personas")
 def post_chat_persona(body: PersonaBody) -> dict:
     try:
-        save_persona(body.name, body.model_dump())
+        save_persona(identity.current_owner().id, body.name, body.model_dump())
     except (OSError, ValueError) as exc:
         raise AppError(f"Could not save the persona: {exc}") from exc
-    return {"personas": get_personas()}
+    return {"personas": get_personas(identity.current_owner().id)}
 
 
 @app.post("/api/chat/personas/delete")
 def post_delete_chat_persona(body: PersonaNameBody) -> dict:
     try:
-        removed = delete_persona(body.name)
+        removed = delete_persona(identity.current_owner().id, body.name)
     except OSError as exc:
         raise AppError(f"Could not delete the persona: {exc}") from exc
     if not removed:
         raise AppError("That persona no longer exists.")
-    return {"personas": get_personas()}
+    return {"personas": get_personas(identity.current_owner().id)}
 
 
 # ---------------------------------------------------------------------------
@@ -1647,7 +1698,9 @@ def audio_voices(model_id: str) -> dict:
 
 @app.get("/api/audio/saved-voices")
 def audio_saved_voices() -> dict:
-    return {"voices": list_saved_voices(AUDIOCPP_VOICE_DIR)}
+    return {"voices": list_saved_voices(
+            AUDIOCPP_VOICE_DIR, identity.current_owner().id
+        )}
 
 
 @app.post("/api/audio/load")
@@ -1682,7 +1735,9 @@ def audio_save_voice(body: SaveVoiceBody) -> dict:
     except AppError as exc:
         raise AppError(str(exc)) from exc
     try:
-        _save_voice_reference(AUDIOCPP_VOICE_DIR, clean, wav, body.transcript)
+        _save_voice_reference(
+            AUDIOCPP_VOICE_DIR, identity.current_owner().id, clean, wav, body.transcript
+        )
     except OSError as exc:
         raise AppError(f"Could not save voice: {exc}") from exc
     finally:
@@ -1707,12 +1762,16 @@ def audio_delete_voice(body: DeleteVoiceBody) -> dict:
     clean = _sanitize_voice_name(body.name)
     if not clean:
         raise AppError("Choose a saved voice to delete.")
-    if not delete_saved_voice(AUDIOCPP_VOICE_DIR, clean):
+    if not delete_saved_voice(
+            AUDIOCPP_VOICE_DIR, identity.current_owner().id, clean
+        ):
         raise AppError("That saved voice no longer exists.")
     return {
         "status": f"Deleted saved voice {clean}.",
         "name": clean,
-        "voices": list_saved_voices(AUDIOCPP_VOICE_DIR),
+        "voices": list_saved_voices(
+            AUDIOCPP_VOICE_DIR, identity.current_owner().id
+        ),
     }
 
 

@@ -5,25 +5,48 @@ import os
 import shlex
 import shutil
 
-from dotenv import load_dotenv
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
+# Where the code lives: the folder that contains the ``comfyui_ui`` package.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WORKFLOWS_DIR = os.path.join(BASE_DIR, "workflows")
-CONFIGS_DIR = os.path.join(BASE_DIR, "configs")
+
+
+def _data_root() -> str:
+    """Return the folder that holds configs, workflows and user data.
+
+    ``OPENSAIL_HOME`` wins, so an installed copy can keep its data outside the
+    package. Otherwise a source checkout (recognisable by its ``web`` folder)
+    keeps everything beside the code, and a wheel install falls back to the
+    current directory.
+    """
+    configured = os.environ.get("OPENSAIL_HOME")
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    if os.path.isdir(os.path.join(BASE_DIR, "web")):
+        return BASE_DIR
+    return os.getcwd()
+
+
+DATA_ROOT = _data_root()
+WORKFLOWS_DIR = os.path.join(DATA_ROOT, "workflows")
+CONFIGS_DIR = os.path.join(DATA_ROOT, "configs")
+# Per-user data (presets, notes, personas, media, thumbnails, voices) lives
+# under ``data/users/<id>/``; the paths below are shared configuration and the
+# SQLite database rather than any one user's files.
+DATA_DIR = os.path.join(DATA_ROOT, "data")
+USERS_DIR = os.path.join(DATA_DIR, "users")
+DB_PATH = os.path.join(DATA_DIR, "opensail.db")
+# The owner used by the community edition, and by premium before a key is
+# activated. Every per-user file is namespaced by this id.
+LOCAL_OWNER_ID = 1
 # Slow-loading image previews for the gallery are cached here, using the same
 # filename as the generated image.
-THUMBNAILS_DIR = os.path.join(BASE_DIR, "thumbnails")
+THUMBNAILS_DIR = os.path.join(DATA_ROOT, "thumbnails")
 # Optional drop folder for local media (images, audio and video). Files placed
 # here are listed in the galleries alongside ComfyUI history, and can be used
 # as inputs on the Generate page. Subfolders are scanned too.
-LOCAL_MEDIA_DIR = os.path.join(BASE_DIR, "media")
-# Optional .env file at the project root, holding secrets such as the dashboard
-# login credentials. Values already present in the environment take priority.
-ENV_PATH = os.path.join(BASE_DIR, ".env")
-load_dotenv(ENV_PATH)
+LOCAL_MEDIA_DIR = os.path.join(DATA_ROOT, "media")
 SAMPLERS_PATH = os.path.join(CONFIGS_DIR, "samplers.json")
 SCHEDULERS_PATH = os.path.join(CONFIGS_DIR, "schedulers.json")
 # Templates for the two files above. Both are git-ignored because their
@@ -113,10 +136,20 @@ def _create_from_example(path: str, example_path: str) -> None:
     Used for the machine-specific config files that are git-ignored, so a
     fresh checkout starts with working defaults instead of a crash. Existing
     files are never overwritten, and a missing example file is not an error.
+
+    When ``DATA_ROOT`` points somewhere other than the code directory (an
+    installed copy, or ``OPENSAIL_HOME``), the example is read from the
+    package's own ``configs`` folder and copied into the data root.
     """
-    if os.path.exists(path) or not os.path.isfile(example_path):
+    if os.path.exists(path):
         return
-    shutil.copyfile(example_path, path)
+    source = example_path
+    if not os.path.isfile(source):
+        source = os.path.join(BASE_DIR, "configs", os.path.basename(example_path))
+    if not os.path.isfile(source):
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    shutil.copyfile(source, path)
 
 
 _create_from_example(SAMPLERS_PATH, SAMPLERS_EXAMPLE_PATH)
@@ -184,16 +217,31 @@ SERVER_PORT = CONFIG["server_port"]
 # When either file is absent the app falls back to HTTP. Browsers require a
 # secure context for microphone access unless the page is on localhost/127.0.0.1.
 CERTS_DIR = os.path.join(CONFIGS_DIR, "certs")
-SERVER_SSL_CERTFILE = CONFIG.get("server_ssl_certfile") or os.path.join(
-    CERTS_DIR, "cert.pem"
+
+
+def _data_path(value: str) -> str:
+    """Resolve a configured path against the data root when it is relative."""
+    path = os.path.expanduser(str(value or "").strip())
+    if path and not os.path.isabs(path):
+        path = os.path.join(DATA_ROOT, path)
+    return path
+
+
+SERVER_SSL_CERTFILE = _data_path(
+    CONFIG.get("server_ssl_certfile") or os.path.join(CERTS_DIR, "cert.pem")
 )
-SERVER_SSL_KEYFILE = CONFIG.get("server_ssl_keyfile") or os.path.join(
-    CERTS_DIR, "key.pem"
+SERVER_SSL_KEYFILE = _data_path(
+    CONFIG.get("server_ssl_keyfile") or os.path.join(CERTS_DIR, "key.pem")
 )
 # When True, node inputs with no matching field definition are still offered
 # in the picker with a generic widget based on their value type.
 SHOW_UNMATCHED_NODE_INPUTS = bool(
     CONFIG.get("show_unmatched_node_inputs", False)
+)
+# How many ComfyUI workflows may run at once. One GPU is normally the limit, so
+# extra requests wait in a queue instead of being refused.
+GENERATION_MAX_CONCURRENT = max(
+    1, int(CONFIG.get("generation_max_concurrent", 1))
 )
 
 # --- Chat / LLM settings --------------------------------------------------
@@ -252,7 +300,7 @@ AUDIOCPP_FFMPEG_PATH = CONFIG.get("audiocpp_ffmpeg_path", "")
 # holds one ``<name>|<transcript>`` line per voice. Passed to the server as its
 # ``voice_dir``; when empty, ``<project>/voices`` is used.
 AUDIOCPP_VOICE_DIR = CONFIG.get("audiocpp_voice_dir", "") or os.path.join(
-    BASE_DIR, "voices"
+    DATA_ROOT, "voices"
 )
 # Optional explicit server.json. When set, it is used as-is instead of
 # generating one from configs/audio_models.json. When a path is given for a
@@ -260,22 +308,3 @@ AUDIOCPP_VOICE_DIR = CONFIG.get("audiocpp_voice_dir", "") or os.path.join(
 AUDIOCPP_CONFIG_PATH = CONFIG.get("audiocpp_config_path", "")
 # Unload every resident model after this many idle milliseconds (0 disables).
 AUDIOCPP_IDLE_UNLOAD_MS = int(CONFIG.get("audiocpp_idle_unload_ms", 0))
-
-
-def _load_auth() -> tuple[str, str] | None:
-    """Return the dashboard login credentials from the environment, if set.
-
-    Reads ``APP_USERNAME`` / ``APP_PASSWORD`` from the ``.env`` file or the
-    process environment. When both are set, returns a ``(username, password)``
-    tuple for HTTP Basic auth; otherwise returns ``None`` so the app runs
-    without authentication.
-    """
-    username = os.environ.get("APP_USERNAME")
-    password = os.environ.get("APP_PASSWORD")
-    if username and password:
-        return (username, password)
-    return None
-
-
-# Login credentials for the dashboard, or None to disable authentication.
-APP_AUTH = _load_auth()
